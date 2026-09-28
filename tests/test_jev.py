@@ -45,7 +45,7 @@ def log_text(count=150):
 
 def saved_evidence(tmp_path, raw):
     path = tmp_path / "build.log"
-    path.write_text(raw, encoding="utf-8", newline="")
+    path.write_bytes(raw.encode("utf-8"))
     return read_evidence_file(str(path), "inspect", [str(tmp_path)], max_lines=10000, max_bytes=128 * 1024)
 
 def test_missing_key_is_unavailable_not_safe():
