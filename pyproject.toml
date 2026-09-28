@@ -4,16 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jev-decision"
-version = "0.1.0"
-description = "Zero-dependency System 1 decision client, calibration evaluator, and harness guardrails for Jev (TypeSafe AI)"
+version = "0.2.0"
+description = "Zero-dependency System 1 decision engine, calibrated guardrails, MCP server, and token optimization client for Jev (TypeSafe AI)"
 readme = "README.md"
 requires-python = ">=3.9"
-authors = [{ name = "Engraphis & Agent Ecosystem" }]
+authors = [{ name = "Coding-Dev-Tools & Agent Ecosystem" }]
 license = { text = "MIT" }
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Quality Assurance",
 ]
+
+[project.scripts]
+jev = "jev_decision.cli:main"
+jev-mcp = "jev_decision.mcp:main"
 
 [project.optional-dependencies]
 test = ["pytest"]
