@@ -129,6 +129,42 @@ def test_noninteractive_keyring_configures_without_unlocking_or_claiming_presenc
     assert result["credential_saved"] is False and result["provider_authenticated"] is False
 
 
+@pytest.mark.parametrize("explicit_source", [False, True])
+def test_interactive_reconfiguration_preserves_existing_keyring(setup_home, monkeypatch, tmp_path, explicit_source):
+    previous = replace(RuntimeConfig.load(), enabled=True, setup_complete=True,
+                       credential_source="keyring", daily_budget_usd="1.00",
+                       workspace_roots=(setup_home,), harness_target="cursor")
+    previous.save()
+    previous.ledger_path.write_bytes(b"retained-accounting")
+    monkeypatch.setattr(setup, "validate_credential_source", lambda config: {"source": "keyring"})
+    monkeypatch.setattr(setup, "set_api_key_interactive", lambda *_: pytest.fail("existing vault credential overwritten"))
+    options = {"credential_source": "keyring"} if explicit_source else {}
+    result = setup.run_setup(interactive=True, daily_budget="2.50", workspaces=[tmp_path],
+                             harness="command-code", input_fn=lambda _: "", **options)
+    current = RuntimeConfig.load()
+    assert current.daily_budget_usd == Decimal("2.50")
+    assert current.workspace_roots == (tmp_path,) and current.harness_target == "command-code"
+    assert current.credential_source == "keyring"
+    assert current.ledger_path.read_bytes() == b"retained-accounting"
+    assert result["credential"]["credential_present"] is None
+    assert result["credential"]["presence_status"] == "not_checked"
+    assert result["credential_saved"] is False and result["provider_calls"] == 0
+    assert "jev auth set" in result["next_step"]
+
+
+@pytest.mark.parametrize("existing_source", [None, "env"])
+def test_first_keyring_selection_still_offers_masked_entry(setup_home, monkeypatch, existing_source):
+    if existing_source:
+        replace(RuntimeConfig.load(), setup_complete=True, credential_source=existing_source).save()
+    prompted = []
+    monkeypatch.setattr(setup, "validate_credential_source", lambda config: {"source": "keyring"})
+    monkeypatch.setattr(setup, "set_api_key_interactive", lambda config: prompted.append(config.credential_source))
+    result = setup.run_setup(interactive=True, credential_source="keyring", daily_budget=0,
+                             timezone="UTC", workspaces=[], harness="cursor")
+    assert prompted == ["keyring"]
+    assert result["credential_saved"] is True and result["provider_calls"] == 0
+
+
 def test_invalid_project_is_rejected_before_interactive_key_prompt(setup_home, monkeypatch, tmp_path):
     monkeypatch.setattr(setup, "set_api_key_interactive", lambda *a: pytest.fail("key prompt before validation"))
     with pytest.raises(harnesses.HarnessError, match="project_root_not_found"):

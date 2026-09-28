@@ -19,6 +19,8 @@ New installations load offline until `jev setup` records an explicit choice. Set
 
 Existing v1 config keeps its budget, enabled state, New York timezone, credential file and ledger. The old pruning boolean cannot enable unqualified omission. Keep the same physical runtime home through upgrade; generated MCP entries carry `JEV_HOME`, and CLI skills carry `--runtime-home`. Timezone changes do not reset the active spend window early.
 
+Repeating interactive setup with an existing keyring configuration preserves its credential reference while changing budget, workspace or harness settings. Keyring presence remains unknown without unlocking the vault. Use `jev auth set` explicitly to add or replace the key; setup does not infer that an unknown credential is missing.
+
 Use `harness install/restore --target NAME --scope user|project`; project scope additionally needs an absolute root. CLI mutations require an explicit target or the saved setup target. Previewing or installing never proves connection, authentication or live client invocation.
 
 Evidence now has three explicit modes. `off` performs no semantic requests, `shadow` retains all evidence while scoring eligible records, and `select` requires a qualified local profile plus `expected_workload` in Python, `workload` in MCP, or `--workload FILE` in the CLI. `allow_prune=True` remains a compatibility spelling for selection and cannot bypass qualification. The old small-pilot result is not sufficient.

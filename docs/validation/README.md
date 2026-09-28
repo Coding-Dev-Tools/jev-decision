@@ -4,7 +4,7 @@ The source validation on 2026-09-28 used Windows, Python 3.12.10, Node 24.15.0 a
 
 | Check | Observed result |
 | --- | --- |
-| Full Python suite | 434 passed, 1 skipped (Windows symlink privilege) |
+| Full Python suite | 438 passed, 1 skipped (Windows symlink privilege) |
 | TypeScript build + Node suite | 83 passed |
 | Shared Python/TypeScript fixtures | Passed against compiled TypeScript |
 | Actual stdio subprocess | Legacy handshake, automatic discovery and 2026-07-28 passed; separate 2024-11-05 negotiation passed |
@@ -14,6 +14,7 @@ The source validation on 2026-09-28 used Windows, Python 3.12.10, Node 24.15.0 a
 | npm packaging | Packed archive installed outside checkout; offline client invocation passed |
 | Command Code recipe | Temporary user/project install, explicit skill, shared-entry conflict protection, restore and capture-to-off-read passed; installed 1.66.0 source checked |
 | Evidence and policy review | Opened-file validation, real Windows junction races, stale roots, policy downgrade matrix and credential-free diagnostics passed |
+| Setup credential preservation | Existing keyring references survive interactive reconfiguration; fresh setup/backend changes still offer masked entry |
 | Qualification review | Source-span grading excludes markers/redaction/gaps, matches pages across arms, detects tampering and rejects old grading methods |
 | Static checks | Python undefined/unused-name checks and Git whitespace checks passed |
 

@@ -115,7 +115,9 @@ def run_setup(*, interactive: bool = True, credential_source: Optional[str] = No
     backend = validate_credential_source(updated)
     presence = credential_status(updated)
     credential_saved = False
-    if interactive and credential_source in {"dpapi", "keyring"}:
+    preserve_keyring = (previous.setup_complete and previous.credential_source == "keyring"
+                        and credential_source == "keyring")
+    if interactive and credential_source in {"dpapi", "keyring"} and not preserve_keyring:
         if presence["credential_present"] is not True:
             set_api_key_interactive(updated)
             credential_saved = True
@@ -137,7 +139,9 @@ def run_setup(*, interactive: bool = True, credential_source: Optional[str] = No
         "provider_calls": 0, "harness_installed": False,
         "harness_preview": preview, "install_args": install_args,
         "next_step": ("Set the referenced variable in the harness launch environment. "
-                      if credential_source == "env" else "") +
+                      if credential_source == "env" else
+                      "Existing keyring reference retained; use jev auth set to add or replace its key. "
+                      if preserve_keyring else "") +
                      ("Apply the selected harness preview, reload that client, then verify a real client call separately."
                       if harness else "Configure a supported MCP client or use the JSON CLI interface."),
     }
