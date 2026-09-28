@@ -26,6 +26,11 @@ _MISSING = object()
 _LIMIT = 4 * 1024 * 1024
 _BEGIN = "# >>> jev-decision managed MCP"
 _END = "# <<< jev-decision managed MCP"
+HARNESS_TARGETS = frozenset({"codex", "command-code", "antigravity", "antigravity-ide",
+    "claude-code", "claude-desktop", "cursor", "opencode", "crush", "pi", "hermes",
+    "omp", "openclaude", "copilot", "gemini-cli"})
+PROJECT_TARGETS = frozenset({"codex", "claude-code", "cursor", "gemini-cli",
+                           "antigravity", "antigravity-ide", "opencode"})
 
 
 class HarnessError(ValueError):
@@ -186,9 +191,11 @@ def _toml(text):
         raise HarnessError("invalid_configuration") from None
 
 
-def _toml_block(python):
+def _toml_block(python, key_env=None, runtime_home=None):
     return (_BEGIN + "\n[mcp_servers.jev]\ncommand = " + json.dumps(python) +
-            '\nargs = ["-I", "-m", "jev_decision.mcp"]\nenabled = true\n' + _END + "\n")
+            '\nargs = ["-I", "-m", "jev_decision.mcp"]\nenabled = true\n' +
+            ('env = { JEV_HOME = ' + json.dumps(str(runtime_home)) + ' }\n' if runtime_home else "") +
+            ("env_vars = " + json.dumps([key_env]) + "\n" if key_env else "") + _END + "\n")
 
 
 @dataclass
@@ -199,6 +206,8 @@ class _Artifact:
     parent: Optional[str] = None
     clients: List[str] = field(default_factory=list)
     detected: bool = True
+    scope: str = "user"
+    project_root: Optional[str] = None
 
     @property
     def identity(self):
@@ -299,37 +308,78 @@ def _location(name, default, filename=None):
     return path
 
 
-def _skill(python, inactive=False):
+def _skill(python, inactive=False, runtime_home=None):
     template = (Path(__file__).parent / "resources" / "jev-skill.md").read_text(encoding="utf-8")
     command = ("& '" + python.replace("'", "''") + "'" if os.name == "nt" else shlex.quote(python))
-    return (template.replace("{{CLI_COMMAND}}", command + " -I -m jev_decision.cli")
+    command += " -I -m jev_decision.cli"
+    if runtime_home is not None:
+        path = str(runtime_home)
+        command += " --runtime-home " + ("'" + path.replace("'", "''") + "'" if os.name == "nt" else shlex.quote(path))
+    return (template.replace("{{CLI_COMMAND}}", command)
             .replace("{{SHELL}}", "powershell" if os.name == "nt" else "sh")
             .replace("{{ACTIVATION}}", "This profile has no verified runnable client. These are inactive setup instructions; no operational integration is claimed.\n" if inactive else ""))
 
 
-def _discover():
+def _discover(target=None, scope="user", project_root=None, runtime=None):
+    if target is not None and (not isinstance(target, str) or target not in HARNESS_TARGETS):
+        raise HarnessError("unknown_harness_target")
+    if not isinstance(scope, str) or scope not in {"user", "project"}:
+        raise HarnessError("invalid_harness_scope")
+    if scope == "project":
+        if target not in PROJECT_TARGETS:
+            raise HarnessError("project_scope_unsupported_for_target")
+        if not isinstance(project_root, (str, Path)) or not Path(project_root).expanduser().is_absolute():
+            raise HarnessError("absolute_project_root_required")
+        project_root = Path(project_root).expanduser().resolve()
+        if not project_root.is_dir():
+            raise HarnessError("project_root_not_found")
+    elif project_root is not None:
+        raise HarnessError("project_root_requires_project_scope")
+    runtime = runtime or RuntimeConfig.load()
     home = Path.home()
     local = _location("LOCALAPPDATA", home / "AppData" / "Local")
     xdg = _location("XDG_CONFIG_HOME", home / ".config")
     codex = _location("CODEX_HOME", home / ".codex")
     python = str(Path(sys.executable).resolve())
-    stdio = {"command": python, "args": ["-I", "-m", "jev_decision.mcp"]}
+    stdio = {"command": python, "args": ["-I", "-m", "jev_decision.mcp"],
+             "env": {"JEV_HOME": str(runtime.home)}}
     artifacts, clients = {}, []
 
     def add(name, profile, commands, config=None, kind="json", parent="mcpServers", value=None,
             skill_root=None, executable=None, inactive_if_missing=False):
+        if target is not None and name != target:
+            return
+        if scope == "project":
+            mappings = {
+                "codex": (".codex/config.toml", ".agents/skills"),
+                "claude-code": (".mcp.json", ".claude/skills"),
+                "cursor": (".cursor/mcp.json", ".cursor/skills"),
+                "gemini-cli": (".gemini/settings.json", ".gemini/skills"),
+                "antigravity": (".agents/mcp_config.json", ".agents/skills"),
+                "antigravity-ide": (".agents/mcp_config.json", ".agents/skills"),
+                "opencode": ("opencode.json" if (project_root / "opencode.json").exists() else "opencode.jsonc", ".opencode/skills"),
+            }
+            config_path, skills_path = mappings[name]
+            config, skill_root = project_root / config_path, project_root / skills_path
+            profile = project_root
         runnable = any(shutil.which(command) is not None for command in commands)
         runnable = runnable or bool(executable and executable.is_file())
         detected = runnable or profile.exists() or bool(config and config.exists())
         inactive = inactive_if_missing and not runnable
         clients.append({"name": name, "detected": detected, "runnable_detected": runnable,
                         "adapter": "inactive_guidance" if inactive else "mcp_and_skill" if config else "cli_skill",
-                        "operational_verified": False})
+                        "configured": False, "launcher_executable_present": Path(python).is_file(),
+                        "launchable": None, "mcp_connected": False, "provider_authenticated": False,
+                        "actual_client_verified": False, "operational_verified": False,
+                        "scope": scope, "selected": name == target})
         entries = []
         if config:
-            entries.append(_Artifact(config, kind, value, parent, [name], detected))
+            entries.append(_Artifact(config, kind, value, parent, [name], detected or name == target,
+                                     scope, str(project_root) if project_root else None))
         if skill_root:
-            entries.append(_Artifact(skill_root / SKILL / "SKILL.md", "skill", _skill(python, inactive), None, [name], detected))
+            entries.append(_Artifact(skill_root / SKILL / "SKILL.md", "skill", _skill(python, inactive, runtime.home), None,
+                                     [name], detected or name == target, scope,
+                                     str(project_root) if project_root else None))
         for item in entries:
             previous = artifacts.get(item.identity)
             if previous:
@@ -339,7 +389,7 @@ def _discover():
                 artifacts[item.identity] = item
 
     add("codex", codex, ["codex"], codex / "config.toml", "toml", "mcp_servers",
-        _toml_block(python), codex / "skills")
+        _toml_block(python, runtime.key_env if runtime.credential_source == "env" else None, runtime.home), codex / "skills")
     root = home / ".commandcode"
     add("command-code", root, ["cmdc", "commandcode"], root / "mcp.json", value=dict(stdio, transport="stdio", enabled=True),
         skill_root=root / "skills", executable=local / "Programs" / "Command Code" / "Command Code.exe")
@@ -348,37 +398,63 @@ def _discover():
                               ("antigravity-ide", "Antigravity IDE", "Antigravity IDE.exe")):
         add(name, gemini / name, [name], gemini / "config" / "mcp_config.json", value=stdio,
             skill_root=gemini / "config" / "skills", executable=local / "Programs" / folder / exe)
-    add("claude-code", home / ".claude", ["claude"], home / ".claude.json", value=dict(stdio, type="stdio"),
+    claude_stdio = dict(stdio, type="stdio", env=dict(stdio["env"]))
+    if runtime.credential_source == "env":
+        claude_stdio["env"][runtime.key_env] = "${" + runtime.key_env + "}"
+    add("claude-code", home / ".claude", ["claude"], home / ".claude.json", value=claude_stdio,
         skill_root=home / ".claude" / "skills")
-    add("cursor", home / ".cursor", ["cursor"], home / ".cursor" / "mcp.json", value=stdio,
+    if sys.platform == "win32":
+        desktop = _location("APPDATA", home / "AppData" / "Roaming") / "Claude"
+        desktop_exe = local / "Programs" / "Claude" / "Claude.exe"
+    elif sys.platform == "darwin":
+        desktop = home / "Library" / "Application Support" / "Claude"
+        desktop_exe = Path("/Applications/Claude.app/Contents/MacOS/Claude")
+    else:
+        desktop = desktop_exe = None
+    if desktop is not None:
+        add("claude-desktop", desktop, ["claude-desktop"], desktop / "claude_desktop_config.json",
+            value=stdio, executable=desktop_exe)
+    elif target == "claude-desktop":
+        raise HarnessError("claude_desktop_platform_unsupported")
+    cursor_stdio = dict(stdio, env=dict(stdio["env"]))
+    if runtime.credential_source == "env":
+        cursor_stdio["env"][runtime.key_env] = "${env:" + runtime.key_env + "}"
+    add("cursor", home / ".cursor", ["cursor"], home / ".cursor" / "mcp.json", value=cursor_stdio,
         skill_root=home / ".cursor" / "skills", executable=local / "Programs" / "cursor" / "Cursor.exe")
     root = xdg / "opencode"
     oc = _location("OPENCODE_CONFIG", root / "opencode.jsonc")
     if not os.environ.get("OPENCODE_CONFIG") and (root / "opencode.json").exists():
         oc = root / "opencode.json"
     add("opencode", root, ["opencode"], oc, "jsonc", "mcp",
-        {"type": "local", "command": [python, "-I", "-m", "jev_decision.mcp"], "enabled": True}, root / "skills")
+        {"type": "local", "command": [python, "-I", "-m", "jev_decision.mcp"], "enabled": True,
+         "environment": {"JEV_HOME": str(runtime.home)}}, root / "skills")
     crush_global = _location("CRUSH_GLOBAL_CONFIG", xdg / "crush" / "crush.json", "crush.json")
     crush_data = _location("CRUSH_GLOBAL_DATA", local / "crush", "crush.json")
     crush = crush_global if crush_global.exists() or os.environ.get("CRUSH_GLOBAL_CONFIG") else crush_data
     add("crush", local / "crush", ["crush"], crush, parent="mcp", value=dict(stdio, type="stdio"),
         skill_root=local / "crush" / "skills")
+    gemini_stdio = dict(stdio, env=dict(stdio["env"]))
+    if runtime.credential_source == "env":
+        # Gemini strips sensitive inherited variables unless the server names
+        # them explicitly. Resolve the reference in the client, never here.
+        gemini_stdio["env"][runtime.key_env] = "${" + runtime.key_env + "}"
+    add("gemini-cli", gemini, ["gemini"], gemini / "settings.json", value=gemini_stdio,
+        skill_root=gemini / "skills", inactive_if_missing=True)
     for name, profile, commands in (("pi", home / ".pi" / "agent", ["pi"]),
                                     ("hermes", home / ".hermes", ["hermes"]),
                                     ("omp", home / ".omp" / "agent", ["omp"]),
                                     ("openclaude", home / ".openclaude", ["openclaude"]),
-                                    ("copilot", home / ".copilot", ["copilot"]),
-                                    ("gemini-cli", gemini, ["gemini"])):
+                                    ("copilot", home / ".copilot", ["copilot"])):
         add(name, profile, commands, skill_root=profile / "skills", inactive_if_missing=name in {"copilot", "gemini-cli"})
     # Redirect legacy PATH commands without changing global Python packages or
     # PATH. Only use an existing user bin directory already on PATH.
     user_bin = home / "bin"
     path_dirs = [os.path.normcase(str(Path(value).resolve())) for value in os.environ.get("PATH", "").split(os.pathsep) if value]
-    if os.name == "nt" and user_bin.is_dir() and os.path.normcase(str(user_bin.resolve())) in path_dirs:
-        if any(char in python for char in ('"', '%', '\r', '\n')):
+    if target is None and scope == "user" and os.name == "nt" and user_bin.is_dir() and os.path.normcase(str(user_bin.resolve())) in path_dirs:
+        if any(char in python + str(runtime.home) for char in ('"', '%', '\r', '\n')):
             raise HarnessError("launcher_path_unsupported")
         for filename, module in (("jev.cmd", "jev_decision.cli"), ("jev-mcp.cmd", "jev_decision.mcp")):
-            value = '@echo off\r\n"' + python + '" -I -m ' + module + ' %*\r\n'
+            value = '@echo off\r\nsetlocal\r\nset "JEV_HOME=' + str(runtime.home) + '"\r\n"' + python + '" -I -m ' + module + ' %*\r\n'
             item = _Artifact(user_bin / filename, "launcher", value, None, ["jev-cli"])
             artifacts[item.identity] = item
     return artifacts, clients
@@ -489,7 +565,8 @@ def _install_one(artifact, record, manifest, manifest_path, directory, apply):
             parent_created = raw is None or artifact.parent not in _JSON(_decode(raw), artifact.kind == "jsonc").document().value
         record = {"path": str(artifact.path.absolute()), "kind": artifact.kind, "parent": artifact.parent,
                   "before_exists": raw is not None, "backup": backup if raw is not None else None,
-                  "parent_created": parent_created, "whole_file_owned": True}
+                  "parent_created": parent_created, "whole_file_owned": True,
+                  "scope": artifact.scope, "project_root": artifact.project_root, "clients": artifact.clients}
         manifest["entries"][artifact.identity] = record
     elif owned:
         record["whole_file_owned"] = record.get("whole_file_owned", False) and _digest(raw) == owned.get("digest")
@@ -545,17 +622,19 @@ def _restore_one(artifact, record, manifest, manifest_path, directory, apply):
     return "restored"
 
 
-def run_harness_command(action, apply=False) -> Dict[str, Any]:
+def run_harness_command(action, apply=False, *, target=None, scope="user", project_root=None,
+                        config=None) -> Dict[str, Any]:
     """Preview by default; report metadata only, including for malformed configs."""
-    if action not in {"preview", "install", "status", "restore"} or type(apply) is not bool:
+    if not isinstance(action, str) or action not in {"preview", "install", "status", "restore"} or type(apply) is not bool:
         raise HarnessError("invalid_harness_action")
     apply = apply and action in {"install", "restore"}
-    config = RuntimeConfig.load()
+    config = config or RuntimeConfig.load()
     directory = config.home / "harness-backups"
     manifest_path = directory / "ownership.json"
-    artifacts, clients = _discover()
+    artifacts, clients = _discover(target, scope, project_root, runtime=config)
     result = {"action": "preview" if action == "install" and not apply else action,
               "applied": apply, "status": "ok", "runtime_home": str(config.home),
+              "target": target, "scope": scope,
               "harnesses": clients, "items": [], "operational_verified": False,
               "limitations": ["Running clients need reload or restart and an actual-client smoke test.",
                               "Project settings may override user integrations.",
@@ -588,7 +667,19 @@ def run_harness_command(action, apply=False) -> Dict[str, Any]:
             if item["status"] in {"error", "modified_conflict", "unmanaged_conflict"}:
                 result["status"] = "partial"
             result["items"].append(item)
+        for client in clients:
+            rows = [row for row in result["items"] if client["name"] in row["clients"]]
+            client["configured"] = bool(rows) and all(row["status"] in {"configured", "installed", "updated"} for row in rows)
         unknown = set(manifest["entries"]) - set(artifacts)
+        if target is not None:
+            result["unselected_managed_targets"] = len(unknown)
+            unknown = set()
+        else:
+            outside_scope = {identity for identity in unknown
+                             if isinstance(manifest["entries"][identity], dict)
+                             and manifest["entries"][identity].get("scope") == "project"}
+            result["unselected_managed_targets"] = len(outside_scope)
+            unknown -= outside_scope
         if unknown:
             result["status"] = "partial"
             result["unrecognized_managed_targets"] = len(unknown)

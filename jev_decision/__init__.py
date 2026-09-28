@@ -1,8 +1,4 @@
-"""Jev System One Decision Engine & Harness Guardrails.
-
-Zero-dependency client, typed primitives, calibration profiles, and
-high-speed agent guardrails for Jev (TypeSafe AI).
-"""
+"""Portable advisory TypeSafe Jev decisions with optional MCP and OS credentials."""
 
 from .client import DEFAULT_MODEL, JevClient, normalize_questions, validate_response, validate_state
 from .fallback import evaluate_heuristics

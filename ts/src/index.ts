@@ -11,6 +11,7 @@ export const MAX_REQUEST_BYTES = 24_576;
 export const MAX_RESPONSE_BYTES = 262_144;
 export const MAX_DEADLINE_MS = 5_000;
 const PROBABILITY_TOLERANCE = 1e-3;
+const ROUNDING_EPSILON = 1e-12;
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type State = string | JsonValue[] | { [key: string]: JsonValue };
@@ -27,7 +28,7 @@ export interface ChoiceQuestion {
   prompt: Description;
   type: "choice";
   options?: readonly string[];
-  criteria?: Record<string, Description>;
+  criteria?: Record<string, Description | null>;
 }
 export interface ScoreQuestion {
   id: string;
@@ -45,7 +46,7 @@ export type NativeQuestion = {
 } | {
   type: "choice";
   instructions: Description;
-  criteria: Record<string, Description>;
+  criteria: Record<string, Description | null>;
 } | {
   type: "score";
   instructions: Description;
@@ -93,7 +94,7 @@ export interface DecisionBatch {
 }
 
 class ClientFailure extends Error {
-  constructor(readonly code: ErrorCode, readonly transient = false) {
+  constructor(readonly code: ErrorCode, readonly transient = false, readonly retryAfterMs: number | null = null) {
     // Only a fixed code is ever exposed; provider bodies and transport errors are discarded.
     super(code);
   }
@@ -201,8 +202,8 @@ export function normalizeQuestions(input: Questions): Record<string, NativeQuest
       const options = Object.keys(criteria);
       if (options.length < 2 || options.length > 255) fail("invalid_request");
       if (options.some(key => !key.trim())) fail("invalid_request");
-      Object.values(criteria).forEach(assertDescription);
-      output.push([id, { type: "choice", ...common, criteria: criteria as Record<string, Description> }]);
+      Object.values(criteria).forEach(value => { if (value !== null) assertDescription(value); });
+      output.push([id, { type: "choice", ...common, criteria: criteria as Record<string, Description | null> }]);
     } else if (q.type === "score") {
       if (q.criteria !== undefined && q.scale !== undefined && stableJson(q.criteria) !== stableJson(q.scale)) fail("invalid_request");
       const criteria = q.criteria ?? q.scale;
@@ -220,11 +221,49 @@ function probability(value: unknown): number {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1) fail("invalid_response");
   return value;
 }
+/** The provider rounds probability fields to two decimal places. */
+function roundingIntervals(values: readonly number[]): [number, number][] | null {
+  if (!values.every(value => Math.abs(value * 100 - Math.round(value * 100)) <= 1e-8)) return null;
+  return values.map(value => [Math.max(0, value - 0.005), Math.min(1, value + 0.005)]);
+}
 function distribution(value: unknown, keys: readonly string[]): Record<string, number> {
   if (!isRecord(value) || !equalKeys(value, keys)) fail("invalid_response");
   const entries = keys.map(key => [key, probability(value[key])] as const);
-  if (Math.abs(entries.reduce((sum, [, p]) => sum + p, 0) - 1) > PROBABILITY_TOLERANCE) fail("invalid_response");
+  const values = entries.map(([, p]) => p);
+  const total = values.reduce((sum, p) => sum + p, 0);
+  if (total <= 0) fail("invalid_response");
+  const intervals = roundingIntervals(values);
+  if (intervals) {
+    const lower = intervals.reduce((sum, [low]) => sum + low, 0);
+    const upper = intervals.reduce((sum, [, high]) => sum + high, 0);
+    if (lower > 1 + ROUNDING_EPSILON || upper < 1 - ROUNDING_EPSILON) fail("invalid_response");
+  } else if (Math.abs(total - 1) > PROBABILITY_TOLERANCE) fail("invalid_response");
   return Object.fromEntries(entries);
+}
+/** Extremize the expected index while keeping the unrounded probabilities summing to one. */
+function weightedExtreme(intervals: readonly [number, number][], descending: boolean): number {
+  let remaining = Math.max(0, 1 - intervals.reduce((sum, [low]) => sum + low, 0));
+  let mean = intervals.reduce((sum, [low], index) => sum + low * index, 0);
+  const indices = intervals.map((_, index) => index);
+  if (descending) indices.reverse();
+  for (const index of indices) {
+    const [low, high] = intervals[index];
+    const allocated = Math.min(remaining, high - low);
+    mean += allocated * index;
+    remaining = Math.max(0, remaining - allocated);
+  }
+  if (remaining > ROUNDING_EPSILON) fail("invalid_response");
+  return mean;
+}
+function scoreConsistent(score: number, values: readonly number[]): boolean {
+  const intervals = roundingIntervals(values);
+  if (!intervals) {
+    const weighted = values.reduce((sum, p, index) => sum + p * index, 0);
+    return Math.abs(score - weighted) <= PROBABILITY_TOLERANCE;
+  }
+  const minimum = weightedExtreme(intervals, false);
+  const maximum = weightedExtreme(intervals, true);
+  return score + 0.005 >= minimum - ROUNDING_EPSILON && score - 0.005 <= maximum + ROUNDING_EPSILON;
 }
 function stableJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
@@ -258,8 +297,7 @@ function parseResponse(data: unknown, questions: Record<string, NativeQuestion>)
       const probabilities = distribution(answer.probabilities, keys);
       const score = answer.score;
       if (typeof score !== "number" || !Number.isFinite(score) || score < 0 || score > q.criteria.length - 1) fail("invalid_response");
-      const expected = keys.reduce((sum, key) => sum + Number(key) * probabilities[key], 0);
-      if (Math.abs(score - expected) > PROBABILITY_TOLERANCE) fail("invalid_response");
+      if (!scoreConsistent(score, keys.map(key => probabilities[key]))) fail("invalid_response");
       decisions.push([id, { type: "score", score, legend: answer.legend as Record<string, Description>, probabilities, confidence: probability(answer.confidence) }]);
     }
   }
@@ -286,6 +324,18 @@ function beforeDeadline<T>(pending: Promise<T>, signal: AbortSignal): Promise<T>
 }
 async function discard(response: Response): Promise<void> {
   try { await response.body?.cancel(); } catch { /* Never expose response data. */ }
+}
+function retryAfterMilliseconds(value: string | null): number | null {
+  if (value === null || value.length > 128) return null;
+  const hint = value.trim();
+  if (/^[0-9]+(?:\.[0-9]+)?$/.test(hint)) {
+    const milliseconds = Number(hint) * 1000;
+    return Number.isFinite(milliseconds) ? milliseconds : null;
+  }
+  // Require an HTTP date, rather than Date.parse's permissive numeric/date input.
+  if (!/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day)?,/i.test(hint)) return null;
+  const parsed = Date.parse(hint);
+  return Number.isFinite(parsed) ? Math.max(0, parsed - Date.now()) : null;
 }
 /** JSON.parse validates syntax; this bounded second pass rejects duplicate decoded keys. */
 function strictJsonParse(text: string): unknown {
@@ -479,7 +529,7 @@ export class JevClient implements JevEvaluator {
           if (response.status !== 200) {
             void discard(response);
             const code = response.status === 401 || response.status === 403 ? "authentication_error" : response.status === 429 ? "rate_limited" : "provider_error";
-            throw new ClientFailure(code, [408, 429, 500, 502, 503, 504].includes(response.status));
+            throw new ClientFailure(code, [408, 429, 500, 502, 503, 504, 529].includes(response.status), retryAfterMilliseconds(response.headers.get("retry-after")));
           }
           let data: unknown;
           try { data = await readResponse(response, controller.signal); }
@@ -493,7 +543,9 @@ export class JevClient implements JevEvaluator {
         } catch (error) {
           const failure = error instanceof ClientFailure ? error : new ClientFailure("invalid_response");
           if (!failure.transient || attempts >= 2 || controller.signal.aborted) throw failure;
-          await beforeDeadline(new Promise<void>(resolve => setTimeout(resolve, 100)), controller.signal);
+          const delay = Math.max(50 + Math.random() * 50, failure.retryAfterMs ?? 0);
+          if (delay >= this.#timeoutMs - (performance.now() - started)) throw failure;
+          await beforeDeadline(new Promise<void>(resolve => setTimeout(resolve, delay)), controller.signal);
         }
       }
     } catch (error) {

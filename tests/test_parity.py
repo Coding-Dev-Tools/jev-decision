@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from jev_decision.client import JevClient
+from jev_decision.runtime import RuntimeConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = json.loads((ROOT / "ts/test/fixtures/contract.json").read_text(encoding="utf-8"))
@@ -29,7 +30,8 @@ def materialize(spec):
 
 def normalized_result(spec):
     body = materialize(spec)
-    client = JevClient(api_key="fixture-only-not-a-real-key", transport=lambda *args: (200, body))
+    client = JevClient(api_key="fixture-only-not-a-real-key", runtime=RuntimeConfig(enabled=True),
+                       transport=lambda *args: (200, body))
     result = client.evaluate(FIXTURE["state"], FIXTURE["questions"]).to_dict()
     result.pop("latency_ms")
     result.pop("request_id")

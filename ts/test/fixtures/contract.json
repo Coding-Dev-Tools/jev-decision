@@ -3,7 +3,7 @@
   "state": {"task": "Assess the relevance of sanitized evidence", "excerpt": "The fixture includes a specific reproduction and verified output."},
   "questions": {
     "relevant": {"type": "noul", "instructions": "Does the evidence directly address the stated task?"},
-    "route": {"type": "choice", "instructions": "Choose an evidence handling route.", "criteria": {"inspect": "Inspect directly relevant evidence", "ignore": "Ignore unrelated background evidence"}},
+    "route": {"type": "choice", "instructions": "Choose an evidence handling route.", "criteria": {"inspect": "Inspect directly relevant evidence", "ignore": null}},
     "quality": {"type": "score", "instructions": "Rate the quality of this evidence.", "criteria": ["Unsupported assertion", "Partial evidence", "Direct verified evidence"]}
   },
   "response": {
@@ -52,6 +52,9 @@
     {"name": "mismatched_model", "patches": [{"op": "set", "path": ["model"], "value": "jev-latest"}], "expected": "unavailable", "expected_overrides": {"error_code": "model_mismatch"}},
     {"name": "distribution_does_not_sum_to_one", "patches": [{"op": "set", "path": ["answers", "route", "probabilities", "inspect"], "value": 0.5}], "expected": "unavailable"},
     {"name": "score_legend_mismatch", "patches": [{"op": "set", "path": ["answers", "quality", "legend", "0"], "value": "Unrequested score level"}], "expected": "unavailable"},
-    {"name": "duplicate_decoded_json_key", "patches": [], "raw_response": "{\"model\":\"jev-1.13.0\",\"\\u006dodel\":\"jev-1.13.0\",\"answers\":{}}", "expected": "unavailable"}
+    {"name": "duplicate_decoded_json_key", "patches": [], "raw_response": "{\"model\":\"jev-1.13.0\",\"\\u006dodel\":\"jev-1.13.0\",\"answers\":{}}", "expected": "unavailable"},
+    {"name": "rounded_score_feasible", "patches": [{"op": "set", "path": ["answers", "quality", "score"], "value": 1.69}, {"op": "set", "path": ["answers", "quality", "probabilities"], "value": {"0": 0.1, "1": 0.1, "2": 0.8}}], "expected": "ok", "expected_overrides": {"decisions": {"relevant": {"type": "noul", "probability": 0.85, "confidence": null}, "route": {"type": "choice", "selected": "inspect", "confidence": 0.9, "probabilities": {"inspect": 0.8, "ignore": 0.2}}, "quality": {"type": "score", "score": 1.69, "confidence": 0.75, "legend": {"0": "Unsupported assertion", "1": "Partial evidence", "2": "Direct verified evidence"}, "probabilities": {"0": 0.1, "1": 0.1, "2": 0.8}}}}},
+    {"name": "rounded_sum_feasible", "patches": [{"op": "set", "path": ["answers", "quality", "score"], "value": 1.69}, {"op": "set", "path": ["answers", "quality", "probabilities"], "value": {"0": 0.1, "1": 0.1, "2": 0.79}}], "expected": "ok", "expected_overrides": {"decisions": {"relevant": {"type": "noul", "probability": 0.85, "confidence": null}, "route": {"type": "choice", "selected": "inspect", "confidence": 0.9, "probabilities": {"inspect": 0.8, "ignore": 0.2}}, "quality": {"type": "score", "score": 1.69, "confidence": 0.75, "legend": {"0": "Unsupported assertion", "1": "Partial evidence", "2": "Direct verified evidence"}, "probabilities": {"0": 0.1, "1": 0.1, "2": 0.79}}}}},
+    {"name": "rounded_score_impossible", "patches": [{"op": "set", "path": ["answers", "quality", "score"], "value": 1.66}, {"op": "set", "path": ["answers", "quality", "probabilities"], "value": {"0": 0.1, "1": 0.1, "2": 0.79}}], "expected": "unavailable"}
   ]
 }

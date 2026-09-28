@@ -6,6 +6,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
+    "check:package": "node scripts/check_package.cjs",
     "test": "npm run build && node --test test/client.test.cjs"
   },
   "keywords": [
@@ -19,7 +20,7 @@
   "author": "Coding-Dev-Tools",
   "license": "MIT",
   "engines": { "node": ">=20" },
-  "files": ["dist/index.js", "dist/index.d.ts", "README.md"],
+  "files": ["dist/index.js", "dist/index.d.ts", "README.md", "LICENSE"],
   "devDependencies": {
     "typescript": "^5.4.0",
     "@types/node": "^20.0.0"

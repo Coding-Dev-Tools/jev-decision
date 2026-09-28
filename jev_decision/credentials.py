@@ -1,12 +1,14 @@
-"""Windows CurrentUser DPAPI credentials, never plaintext configuration."""
+"""Protected OS credentials or an explicit environment reference; never plaintext files."""
 
 from __future__ import annotations
 
 import ctypes
 import getpass
+import hashlib
 import os
 import re
 import subprocess
+import sys
 import tempfile
 import warnings
 from pathlib import Path
@@ -16,6 +18,7 @@ from .runtime import RuntimeConfig
 
 _MAGIC = b"JEV-DPAPI-1\x00"
 _ENTROPY = b"JevDecision credential store v1"
+_KEYRING_SERVICE = "jev-decision"
 
 
 class CredentialError(RuntimeError):
@@ -105,10 +108,66 @@ def _validated_key(value: str) -> str:
     return value
 
 
+def _os_keyring():
+    """Use only known OS vaults, never a plaintext/third-party fallback.
+
+    Merely checking credential status never invokes this function: desktop
+    keychains can display an unlock prompt even for a read.
+    """
+    try:
+        import keyring
+        backend = keyring.get_keyring()
+        platform = "linux" if sys.platform.startswith("linux") else sys.platform
+        allowed = {
+            "win32": {"keyring.backends.Windows.WinVaultKeyring"},
+            "darwin": {"keyring.backends.macOS.Keyring"},
+            "linux": {"keyring.backends.SecretService.Keyring", "keyring.backends.kwallet.DBusKeyring",
+                      "keyring.backends.kwallet.DBusKeyringKWallet4"},
+        }.get(platform, set())
+        def identity(item):
+            return type(item).__module__ + "." + type(item).__name__
+        candidates = backend.backends if identity(backend) == "keyring.backends.chainer.ChainerBackend" else [backend]
+        for candidate in candidates:
+            if identity(candidate) in allowed and candidate.priority > 0:
+                return candidate
+    except ImportError:
+        raise CredentialError("Install the optional keyring extra or choose an environment reference") from None
+    except Exception:
+        raise CredentialError("OS credential storage is unavailable; choose an environment reference") from None
+    raise CredentialError("A supported OS credential backend is required; plaintext backends are refused")
+
+
+def _keyring_account(config: RuntimeConfig) -> str:
+    # Different runtime homes intentionally have separate credential identities.
+    return hashlib.sha256(os.path.normcase(str(config.home)).encode("utf-8")).hexdigest()
+
+
+def validate_credential_source(config: RuntimeConfig) -> Dict[str, Any]:
+    """Validate configuration/backend availability without retrieving a key."""
+    source = config.credential_source
+    if source == "dpapi" and os.name != "nt":
+        raise CredentialError("DPAPI is available only on Windows")
+    result = {"source": source, "authentication_verified": False}
+    if source == "keyring":
+        backend = _os_keyring()
+        result["backend"] = type(backend).__module__ + "." + type(backend).__name__
+    return result
+
+
 def save_api_key(api_key: str, config: Optional[RuntimeConfig] = None) -> None:
     """Protect and atomically save a key supplied directly by a local UI."""
     config = config or RuntimeConfig.load()
     key = _validated_key(api_key)
+    if config.credential_source == "env":
+        raise CredentialError("Set the selected environment variable outside Jev; no plaintext key is stored")
+    if config.credential_source == "keyring":
+        try:
+            _os_keyring().set_password(_KEYRING_SERVICE, _keyring_account(config), key)
+        except CredentialError:
+            raise
+        except Exception:
+            raise CredentialError("Unable to save the credential in OS storage") from None
+        return
     protected = _MAGIC + _dpapi(key.encode("utf-8"), decrypt=False)
     temporary = None
     try:
@@ -141,10 +200,18 @@ def set_api_key_interactive(config: Optional[RuntimeConfig] = None) -> None:
 
 
 def load_api_key(config: Optional[RuntimeConfig] = None, allow_environment: bool = True) -> Optional[str]:
-    """Prefer the managed key; explicit standalone environments remain supported."""
+    """Read only the selected source; auto preserves the v1 compatibility order."""
     config = config or RuntimeConfig.load()
+    if config.credential_source == "keyring":
+        try:
+            value = _os_keyring().get_password(_KEYRING_SERVICE, _keyring_account(config))
+            return _validated_key(value) if value is not None else None
+        except CredentialError:
+            raise
+        except Exception:
+            raise CredentialError("Unable to read the credential from OS storage") from None
     path = config.credential_path
-    if path.exists():
+    if config.credential_source in {"auto", "dpapi"} and path.exists():
         try:
             if not path.is_file() or path.stat().st_size > 64 * 1024:
                 raise CredentialError("Invalid managed credential file")
@@ -155,8 +222,9 @@ def load_api_key(config: Optional[RuntimeConfig] = None, allow_environment: bool
             return _validated_key(clear.decode("utf-8"))
         except (OSError, UnicodeError):
             raise CredentialError("Unable to read managed credential") from None
-    if allow_environment:
-        for name in ("TYPESAFE_API_KEY", "JEV_API_KEY"):
+    if allow_environment and config.credential_source in {"auto", "env"}:
+        names = (config.key_env,) if config.credential_source == "env" else ("TYPESAFE_API_KEY", "JEV_API_KEY")
+        for name in names:
             value = os.environ.get(name)
             if value and value.strip():
                 return _validated_key(value)
@@ -166,8 +234,14 @@ def load_api_key(config: Optional[RuntimeConfig] = None, allow_environment: bool
 def credential_status(config: Optional[RuntimeConfig] = None) -> Dict[str, Any]:
     """Presence metadata only; this deliberately does not claim authentication."""
     config = config or RuntimeConfig.load()
-    managed_present = config.credential_path.is_file()
-    environment_present = any(bool(os.environ.get(name, "").strip()) for name in ("TYPESAFE_API_KEY", "JEV_API_KEY"))
+    managed_present = config.credential_path.is_file() if config.credential_source in {"auto", "dpapi"} else False
+    names = (config.key_env,) if config.credential_source == "env" else ("TYPESAFE_API_KEY", "JEV_API_KEY")
+    environment_present = (any(bool(os.environ.get(name, "").strip()) for name in names)
+                           if config.credential_source in {"auto", "env"} else False)
+    keyring_selected = config.credential_source == "keyring"
     return {"managed_present": managed_present, "environment_present": environment_present,
-            "source": "managed" if managed_present else "environment" if environment_present else "none",
+            "credential_present": None if keyring_selected else managed_present or environment_present,
+            "source": "keyring" if keyring_selected else "managed" if managed_present else "environment" if environment_present else "none",
+            "configured_source": config.credential_source,
+            "presence_status": "not_checked" if keyring_selected else "present" if managed_present or environment_present else "missing",
             "authentication_verified": False}

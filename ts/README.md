@@ -28,9 +28,12 @@ if (result.status === "ok") {
 ```
 
 `evaluate(state, questions)` accepts typed questions or the provider's native
-question map. Choice criteria need descriptions. Score criteria are ordered
+question map. Choice criteria allow descriptive values or native `null`. Score criteria are ordered
 descriptions indexed from zero; the returned score can be fractional and includes
 its legend. Noul returns a probability with `confidence: null`.
+Reported two-decimal probabilities are accepted only when their rounding intervals
+permit total probability one and a compatible score. Returned scores and
+probabilities retain the provider's values; they are never renormalized.
 
 Results use the same snake_case status contract as Python: `status`, `source`,
 `decisions`, `requested_model`, `resolved_model`, `usage`, `latency_ms`, `attempts`,

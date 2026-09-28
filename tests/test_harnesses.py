@@ -2,6 +2,7 @@
 import json
 import os
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -29,7 +30,7 @@ def test_legacy_cli_launcher_is_isolated_and_reversible(profiles, monkeypatch):
 def test_cli_reports_partial_install_as_failure(monkeypatch, capsys):
     from jev_decision.cli import main
     monkeypatch.setattr(harnesses, "run_harness_command", lambda *a, **kw: {"status": "partial"})
-    assert main(["harness", "install"]) == 2
+    assert main(["harness", "install", "--harness", "cursor"]) == 2
     assert json.loads(capsys.readouterr().out)["status"] == "partial"
 
 
@@ -41,6 +42,7 @@ def profiles(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.setattr(harnesses.shutil, "which", lambda name: None)
     monkeypatch.setenv("LOCALAPPDATA", str(local))
+    monkeypatch.setenv("APPDATA", str(home / "AppData" / "Roaming"))
     monkeypatch.setenv("CODEX_HOME", str(home / ".codex"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(home / ".config"))
     for name in ("OPENCODE_CONFIG", "CRUSH_GLOBAL_CONFIG", "CRUSH_GLOBAL_DATA"):
@@ -97,12 +99,13 @@ def test_native_schemas_and_skill_fallbacks_preserve_existing_settings(profiles)
     assert result["status"] == "ok"
     assert all(row["status"] == "installed" for row in result["items"])
     python = str(Path(sys.executable).resolve())
+    environment = {"JEV_HOME": str(RuntimeConfig.load().home)}
     command = _json(home / ".commandcode/mcp.json")["mcpServers"]["jev"]
-    assert command == {"transport": "stdio", "enabled": True, "command": python, "args": ["-I", "-m", "jev_decision.mcp"]}
+    assert command == {"transport": "stdio", "enabled": True, "command": python, "args": ["-I", "-m", "jev_decision.mcp"], "env": environment}
     assert _json(home / ".claude.json")["mcpServers"]["jev"]["type"] == "stdio"
-    assert _json(home / ".gemini/config/mcp_config.json")["mcpServers"]["jev"] == {"command": python, "args": ["-I", "-m", "jev_decision.mcp"]}
+    assert _json(home / ".gemini/config/mcp_config.json")["mcpServers"]["jev"] == {"command": python, "args": ["-I", "-m", "jev_decision.mcp"], "env": environment}
     oc = home / ".config/opencode/opencode.jsonc"
-    assert _json(oc, True)["mcp"]["jev"] == {"type": "local", "command": [python, "-I", "-m", "jev_decision.mcp"], "enabled": True}
+    assert _json(oc, True)["mcp"]["jev"] == {"type": "local", "command": [python, "-I", "-m", "jev_decision.mcp"], "enabled": True, "environment": environment}
     assert '// preserve provider commentary' in oc.read_text()
     assert '// keep inline note' in oc.read_text()
     assert _json(home / "AppData/Local/crush/crush.json")["mcp"]["jev"]["type"] == "stdio"
@@ -113,6 +116,7 @@ def test_native_schemas_and_skill_fallbacks_preserve_existing_settings(profiles)
     for directory in (".pi/agent", ".hermes", ".omp/agent", ".openclaude"):
         skill = (home / directory / "skills/jev-advice/SKILL.md").read_text()
         assert python in skill and " -I -m jev_decision.cli" in skill and "{{" not in skill
+        assert "--runtime-home" in skill and str(RuntimeConfig.load().home) in skill
         assert not (home / directory / "mcp.json").exists()
     assert (home / ".gemini/config/skills/jev-advice/SKILL.md").is_file()
     assert (home / ".copilot/skills/jev-advice/SKILL.md").read_text().count("inactive setup instructions") == 1
@@ -299,6 +303,7 @@ def test_absent_profiles_are_not_created(tmp_path, monkeypatch, profiles):
     empty.mkdir()
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: empty))
     monkeypatch.setenv("LOCALAPPDATA", str(empty / "AppData/Local"))
+    monkeypatch.setenv("APPDATA", str(empty / "AppData/Roaming"))
     monkeypatch.setenv("CODEX_HOME", str(empty / ".codex"))
     monkeypatch.setenv("XDG_CONFIG_HOME", str(empty / ".config"))
     result = harnesses.run_harness_command("install")
@@ -310,4 +315,158 @@ def test_absent_profiles_are_not_created(tmp_path, monkeypatch, profiles):
 def test_invalid_action_is_rejected_without_files(profiles, action):
     with pytest.raises(harnesses.HarnessError, match="invalid_harness_action"):
         harnesses.run_harness_command(action, apply=True)
+    assert not RuntimeConfig.load().home.exists()
+
+
+def test_selected_target_install_and_restore_leave_other_profiles_untouched(profiles):
+    home, _, _ = profiles
+    before = {str(path): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+    installed = harnesses.run_harness_command("install", apply=True, target="cursor")
+    assert installed["status"] == "ok" and installed["target"] == "cursor"
+    assert {client["name"] for client in installed["harnesses"]} == {"cursor"}
+    assert all(row["clients"] == ["cursor"] for row in installed["items"])
+    for path, raw in before.items():
+        if path != str(home / ".cursor/mcp.json"):
+            assert Path(path).read_bytes() == raw
+    assert not (home / ".codex/skills/jev-advice/SKILL.md").exists()
+    client = installed["harnesses"][0]
+    assert client["configured"] is True and client["launchable"] is None
+    assert client["provider_authenticated"] is False and client["actual_client_verified"] is False
+    restored = harnesses.run_harness_command("restore", apply=True, target="cursor")
+    assert restored["status"] == "ok"
+    assert before == {str(path): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+
+
+def test_selected_restore_keeps_other_owned_target(profiles):
+    home, _, _ = profiles
+    harnesses.run_harness_command("install", apply=True, target="codex")
+    codex_files = {str(path): path.read_bytes() for path in (home / ".codex").rglob("*") if path.is_file()}
+    harnesses.run_harness_command("install", apply=True, target="cursor")
+    result = harnesses.run_harness_command("restore", apply=True, target="cursor")
+    assert result["status"] == "ok" and result["unselected_managed_targets"] == 2
+    assert all(Path(path).read_bytes() == raw for path, raw in codex_files.items())
+    assert harnesses.run_harness_command("status", target="codex")["harnesses"][0]["configured"]
+
+
+@pytest.mark.parametrize("target,config_path,skill_path", [
+    ("codex", ".codex/config.toml", ".agents/skills"),
+    ("claude-code", ".mcp.json", ".claude/skills"),
+    ("cursor", ".cursor/mcp.json", ".cursor/skills"),
+    ("gemini-cli", ".gemini/settings.json", ".gemini/skills"),
+    ("antigravity", ".agents/mcp_config.json", ".agents/skills"),
+    ("antigravity-ide", ".agents/mcp_config.json", ".agents/skills"),
+    ("opencode", "opencode.jsonc", ".opencode/skills"),
+])
+def test_project_scope_stays_inside_selected_root_and_restores(profiles, tmp_path, target, config_path, skill_path):
+    home, _, _ = profiles
+    before = {str(path): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+    project = tmp_path / "project with spaces"
+    project.mkdir()
+    options = {"target": target, "scope": "project", "project_root": project}
+    preview = harnesses.run_harness_command("install", **options)
+    assert preview["status"] == "ok" and list(project.iterdir()) == []
+    result = harnesses.run_harness_command("install", apply=True, **options)
+    assert result["status"] == "ok"
+    assert (project / config_path).is_file()
+    assert (project / skill_path / "jev-advice/SKILL.md").is_file()
+    assert all(Path(row["path"]).is_relative_to(project) for row in result["items"])
+    assert before == {str(path): path.read_bytes() for path in home.rglob("*") if path.is_file()}
+    assert harnesses.run_harness_command("status")["status"] == "ok"
+    assert harnesses.run_harness_command("restore", apply=True, **options)["status"] == "ok"
+    assert not [path for path in project.rglob("*") if path.is_file()]
+
+
+def test_gemini_native_mcp_preserves_settings(profiles):
+    home, _, _ = profiles
+    path = home / ".gemini/settings.json"
+    original = '{"theme":"Dark","mcpServers":{"other":{"command":"retained"}}}\n'
+    path.write_text(original)
+    result = harnesses.run_harness_command("install", apply=True, target="gemini-cli")
+    assert result["status"] == "ok"
+    assert _json(path)["theme"] == "Dark"
+    assert _json(path)["mcpServers"]["jev"]["env"] == {"JEV_HOME": str(RuntimeConfig.load().home)}
+    assert harnesses.run_harness_command("restore", apply=True, target="gemini-cli")["status"] == "ok"
+    assert path.read_text() == original
+
+
+@pytest.mark.parametrize("scope", ["user", "project"])
+@pytest.mark.parametrize("target,user_path,project_path,reference", [
+    ("gemini-cli", ".gemini/settings.json", ".gemini/settings.json", "${TEST_JEV_KEY}"),
+    ("claude-code", ".claude.json", ".mcp.json", "${TEST_JEV_KEY}"),
+    ("cursor", ".cursor/mcp.json", ".cursor/mcp.json", "${env:TEST_JEV_KEY}"),
+])
+def test_explicit_environment_reference_never_embeds_secret(profiles, monkeypatch, tmp_path, scope,
+                                                            target, user_path, project_path, reference):
+    home, _, _ = profiles
+    config = replace(RuntimeConfig.load(), credential_source="env", key_env="TEST_JEV_KEY")
+    monkeypatch.setenv("TEST_JEV_KEY", "synthetic-private-value")
+    options = {"target": target, "scope": scope, "config": config}
+    root = home
+    if scope == "project":
+        root = tmp_path / "project"
+        root.mkdir()
+        options["project_root"] = root
+    result = harnesses.run_harness_command("install", apply=True, **options)
+    assert result["status"] == "ok"
+    path = root / (project_path if scope == "project" else user_path)
+    assert _json(path)["mcpServers"]["jev"]["env"] == {
+        "JEV_HOME": str(config.home), "TEST_JEV_KEY": reference}
+    assert "synthetic-private-value" not in path.read_text() + json.dumps(result)
+    manifest = config.home / "harness-backups/ownership.json"
+    assert "synthetic-private-value" not in manifest.read_text()
+    # Per-client interpolation must not mutate shared stdio recipes.
+    artifacts, _ = harnesses._discover("antigravity", runtime=config)
+    untouched = next(item for item in artifacts.values() if item.kind == "json")
+    assert untouched.value["env"] == {"JEV_HOME": str(config.home)}
+    # Protected-store configurations do not add any environment key reference.
+    artifacts, _ = harnesses._discover(target, runtime=replace(config, credential_source="keyring"))
+    protected = next(item for item in artifacts.values() if item.kind == "json")
+    assert protected.value["env"] == {"JEV_HOME": str(config.home)}
+    assert harnesses.run_harness_command("restore", apply=True, **options)["status"] == "ok"
+
+
+@pytest.mark.parametrize("platform,relative", [
+    ("win32", "AppData/Roaming/Claude/claude_desktop_config.json"),
+    ("darwin", "Library/Application Support/Claude/claude_desktop_config.json"),
+])
+def test_claude_desktop_supported_platform_recipes(profiles, monkeypatch, platform, relative):
+    home, _, _ = profiles
+    monkeypatch.setattr(harnesses.sys, "platform", platform)
+    result = harnesses.run_harness_command("install", apply=True, target="claude-desktop")
+    assert result["status"] == "ok" and len(result["items"]) == 1
+    path = home / relative
+    assert _json(path)["mcpServers"]["jev"]["env"]["JEV_HOME"] == str(RuntimeConfig.load().home)
+    assert result["harnesses"][0]["actual_client_verified"] is False
+    assert harnesses.run_harness_command("restore", apply=True, target="claude-desktop")["status"] == "ok"
+    assert not path.exists()
+
+
+def test_claude_desktop_linux_is_explicitly_unsupported(profiles, monkeypatch):
+    monkeypatch.setattr(harnesses.sys, "platform", "linux")
+    with pytest.raises(harnesses.HarnessError, match="platform_unsupported"):
+        harnesses.run_harness_command("install", target="claude-desktop")
+    assert not RuntimeConfig.load().home.exists()
+
+
+def test_codex_forwards_only_environment_reference_and_binds_runtime_home(profiles, monkeypatch):
+    home, _, _ = profiles
+    config = replace(RuntimeConfig.load(), credential_source="env", key_env="TEST_JEV_KEY")
+    monkeypatch.setenv("TEST_JEV_KEY", "synthetic-private-value")
+    result = harnesses.run_harness_command("install", apply=True, target="codex", config=config)
+    assert result["status"] == "ok"
+    text = (home / ".codex/config.toml").read_text()
+    entry = harnesses._toml(text)["mcp_servers"]["jev"]
+    assert entry["env_vars"] == ["TEST_JEV_KEY"] and entry["env"] == {"JEV_HOME": str(config.home)}
+    assert "synthetic-private-value" not in text + json.dumps(result)
+
+
+@pytest.mark.parametrize("options,error", [
+    ({"target": "made-up"}, "unknown_harness"),
+    ({"scope": "all"}, "invalid_harness_scope"),
+    ({"target": "cursor", "scope": "project", "project_root": "relative"}, "absolute_project_root"),
+    ({"target": "claude-desktop", "scope": "project"}, "project_scope_unsupported"),
+])
+def test_invalid_selected_targets_do_not_write(profiles, options, error):
+    with pytest.raises(harnesses.HarnessError, match=error):
+        harnesses.run_harness_command("install", apply=True, **options)
     assert not RuntimeConfig.load().home.exists()

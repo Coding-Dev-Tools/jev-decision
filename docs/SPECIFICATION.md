@@ -1,31 +1,31 @@
-# Jev advisory runtime contract
+# Jev advisory runtime contract, v0.3
 
-Version 0.3.0 pins jev-1.13.0 and the native TypeSafe API. See https://docs.typesafe.ai/api and https://docs.typesafe.ai/models for provider behavior and pricing. Local policy is stricter than the provider maximum to bound transmission, latency and accounting.
+The managed runtime pins `jev-1.13.0` and the exact official TypeSafe HTTPS endpoint. Native questions and complete typed answers follow the [provider API](https://docs.typesafe.ai/api); local limits bound latency, transmission and conservative accounting.
 
-## Data flow
+## Client results
 
-A harness invokes an absolute installed launcher. The runtime loads public policy and a Windows CurrentUser DPAPI credential, sanitizes bounded state and questions, and checks the session cache. For a provider attempt it reserves the maximum documented request cost in a shared SQLite transaction, sends only to the official HTTPS endpoint, and validates the entire typed response. Known input usage settles the reservation; absent or invalid usage retains it. A retry reserves again. Diagnostics contain no key, state or raw response.
+Python and TypeScript expose `status`, `source`, `decisions`, requested/resolved model, usage, latency, attempts, request ID and a content-free error code. Unknown usage remains null, including retries with unknown earlier usage. Cache hits report zero new attempts/usage. Native Choice descriptions may be null. Score preserves fractional rubric positions, legends and provider rounding; it does not renormalize the wire response. Invalid or missing answers reject the whole batch.
 
-The result records status, source, requested and resolved model, optional usage, attempts and a fixed error code. Missing or malformed answers reject the complete response. Question IDs are unique and complete. Noul has no provider confidence field. Choice and Score require finite valid probability distributions. Scores retain fractional values and descriptive legends.
+Offline, missing credentials, expired deadlines and provider failures return no synthetic decisions. Command assessment cannot grant permission, completion assessment cannot certify execution, and advice cannot overwrite canonical benchmark or memory evidence.
 
-## Authority
+## Execution and accounting
 
-Risk assessments never grant execution permission. Evidence assessments never certify completion. Jev output cannot change canonical benchmark grades, evidence artifacts or memory by itself. Offline and unavailable states carry no synthetic decision. Consumers resume their ordinary model and executable verification workflow.
+Fresh runtime loads stay disabled until configured. Explicit library construction can opt in. One monotonic deadline covers preprocessing, reservation, connection, transmission, bounded response reading, validation and settlement. A late connection cannot transmit after cancellation. Retry-After seconds/dates, transient failures including 529 and jitter stay inside one optional retry. Unknown or unfinished accounting retains a conservative reservation; it never creates a success/cache entry after the deadline.
 
-## Evidence selection
+Before every request, SQLite serializes a maximum-request reservation across processes sharing `JEV_HOME`. The configured nonnegative daily budget can exceed the former personal $1 setting; zero disables calls. UTC is the portable default. v1 settings keep their enabled state, budget, New York timezone and ledger history. Timezone changes take effect after the active accounting period so they cannot reset spend early. Provider usage and modeled cost remain distinct from invoices.
 
-Saved UTF-8 evidence can be read through approved workspace roots. Resolve and check paths, reject sensitive names, enforce byte limits, sanitize excerpts, and retain original SHA-256 and source line locations. Large windows that exceed provider bounds remain available locally rather than being truncated into misleading evidence. All bounded windows are assessed together against complete shared state.
+DPAPI protects Windows credentials. Optional OS keyring backends support macOS Keychain/Linux Secret Service; plaintext fallbacks are refused. An explicit environment variable reference supports headless use. Status inspects presence metadata without unlocking a keychain; it never claims authentication. TypeScript is an explicit unmanaged client and does not share Python's local cap.
 
-Pruning is off by default. Even when explicitly enabled after calibration, uncertain assessments retain content. Failure details, test summaries, exit codes, diff boundaries and original artifacts remain protected. Actual token savings require primary-model telemetry; byte counts are not tokens. A tool cannot remove text already consumed by a model.
+## Evidence and profiles
 
-## Accounting and transport
+`off` makes no semantic calls. `shadow` scores bounded eligible records while retaining evidence. `select` requires the exact recoverable original, a qualified profile/report, and matching workload identity. Unknown formats, unprocessed spans and uncertain answers remain intact. File reads preserve source line positions through redaction and expose bounded pagination and changed-hash rejection. Originals are never automatically removed.
 
-The shared allowance is $1 per America/New_York calendar day. A request reserves $0.002688, derived from 64,000 input tokens at $0.042 per million. SQLite immediate transactions serialize reservations across processes. Crashes and unknown usage retain the reservation. Day rollover uses New York calendar boundaries, including DST. Provider billing remains separately unknown.
+The initial limits are 16 questions/~16 KiB per batch, two concurrent evaluations and a five-second selection deadline. Critical structural groups and adjacent context remain protected. These bounds are engineering defaults requiring workload calibration. Omission markers, JSON envelopes, retries, recovery and Jev all count toward measurement.
 
-The default five-second evaluation deadline includes no more than two attempts. Requests and responses are size bounded. Redirects and endpoint overrides are rejected. Identical successful requests can be reused only in the same client session. Existing MCP processes must restart after credential or policy changes. Separate JEV_HOME directories, unmanaged provider SDKs and standalone TypeScript clients are outside the managed shared ledger.
+Qualification recomputes held-out metrics rather than trusting summary flags. It binds source/label/report hashes, Jev model/rubric/thresholds/source classes, explicit primary model/harness identity, independent task/project groups, matched arms/cache strata and campaign budget. It requires retained critical facts, no observed task-success loss, positive net tokens and modeled cost, and no p95 task-time increase. See [evaluation](EVALUATION.md).
 
 ## MCP and installation
 
-The server validates JSON-RPC 2.0 envelopes, tool arguments and bounded newline-delimited messages. Errors preserve valid request IDs and exclude payloads. Tools expose advisory decisions, risk assessment, evidence-gap assessment, evidence reading and local status. No tool runs the assessed command or approves another tool.
+The optional official Python MCP SDK v2 owns protocol negotiation, JSON-RPC framing and errors. It serves legacy and current clients with complete tool schemas. A bounded byte reader rejects oversized/invalid frames without echoing their payload. UTF-8 is explicit for Windows pipes. Core library/JSON CLI imports do not load the SDK.
 
-The installer records only Jev-owned changes, previews updates, keeps private backups and restores matching entries selectively. Native MCP clients share the installed Python runtime. CLI skills use that same absolute executable. Hosted ChatGPT needs a separately authorized private OpenAI Secure MCP Tunnel forwarding to the same runtime. Configuration success is distinct from credential authentication, actual client operation and demonstrated benefit.
+Selected user/project installation previews and applies Jev-owned entries only. Restoration keeps unrelated settings and reports modified conflicts. Absolute launchers and runtime-home bindings keep processes on one credential/ledger. Configuration, connection, authentication, actual invocation and workload qualification are separate states. No tool executes assessed commands or changes permission policy.

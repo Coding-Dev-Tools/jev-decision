@@ -76,7 +76,7 @@ def clear_ambient_configuration(monkeypatch):
 def make_client(tmp_path):
     def factory(transport=None, **kwargs):
         ledger = kwargs.pop("budget_ledger", Ledger())
-        config = kwargs.pop("runtime", RuntimeConfig(home=tmp_path))
+        config = kwargs.pop("runtime", RuntimeConfig(home=tmp_path, enabled=True))
         client = JevClient(
             api_key=kwargs.pop("api_key", KEY),
             runtime=config,
@@ -304,6 +304,7 @@ def test_transient_retry_reserves_every_attempt(make_client):
     (403, "authentication_error", 1),
     (429, "rate_limited", 2),
     (503, "provider_error", 2),
+    (529, "provider_error", 2),
 ])
 def test_http_failure_content_is_never_exposed(make_client, status, code, retries, caplog):
     client, ledger = make_client(lambda *_: (status, (KEY + " provider echo").encode()))
@@ -343,7 +344,10 @@ def test_end_to_end_transport_deadline(make_client):
         assert batch.error_code == "timeout"
         assert batch.attempts == 1
         assert elapsed < 0.3
-        assert ledger.settlements == [(1, None)]
+        assert ledger.reservations == [1]
+        # An expired call may leave the original worst-case reservation in place
+        # rather than spend more deadline time relabeling it as unknown.
+        assert ledger.settlements in ([], [(1, None)])
     finally:
         released.set()
 
@@ -417,6 +421,9 @@ def test_native_transport_does_not_redirect_or_read_error_bodies(monkeypatch):
     class Response:
         status = 302
 
+        def getheader(self, _name):
+            return None
+
         def read1(self, *_):
             pytest.fail("Error body must not be read")
 
@@ -425,6 +432,9 @@ def test_native_transport_does_not_redirect_or_read_error_bodies(monkeypatch):
 
         def __init__(self, host, timeout):
             calls.append(("connect", host, timeout))
+
+        def connect(self):
+            pass
 
         def request(self, method, path, body, headers):
             calls.append(("request", method, path))
@@ -438,7 +448,7 @@ def test_native_transport_does_not_redirect_or_read_error_bodies(monkeypatch):
     monkeypatch.setenv("HTTPS_PROXY", "http://untrusted.invalid")
     monkeypatch.setattr("jev_decision.client.http.client.HTTPSConnection", Connection)
     req = urllib.request.Request(DEFAULT_TYPESAFE_ENDPOINT, data=b"{}", method="POST")
-    assert _http_transport(req, 1, 100) == (302, b"")
+    assert _http_transport(req, 1, 100) == (302, b"", {})
     assert calls == [
         ("connect", "api.typesafe.ai", 1), ("request", "POST", "/v1/systemone"), ("close",),
     ]
@@ -448,3 +458,31 @@ def test_construction_does_not_create_ledger(tmp_path):
     client = JevClient(api_key="", runtime=RuntimeConfig(home=tmp_path))
     assert not client.is_configured
     assert list(tmp_path.iterdir()) == []
+
+
+def test_official_null_choice_descriptions(make_client):
+    questions = {"q": {"type": "choice", "instructions": "Choose a category",
+                        "criteria": {"yes": None, "no": None}}}
+    assert normalize_questions(questions) == questions
+    client, _ = make_client()
+    result = client.evaluate("An excerpt", questions)
+    assert result.status == "ok"
+    assert result.get_choice("q").selected == "no"  # canonical sorted request
+
+
+@pytest.mark.parametrize("hint", ["60", "Mon, 28 Sep 2099 12:00:00 GMT"])
+def test_retry_hint_outside_deadline_prevents_extra_attempt(make_client, hint):
+    client, ledger = make_client(lambda *_: (429, b"", {"Retry-After": hint}), timeout_s=0.2)
+    result = client.evaluate("An excerpt", noul())
+    assert result.error_code == "rate_limited"
+    assert result.attempts == 1
+    assert ledger.reservations == [1]
+
+
+def test_retry_after_date_and_delta_parsing():
+    from jev_decision.client import _retry_after
+    assert _retry_after({"retry-after": "1.25"}) == 1.25
+    assert _retry_after({"Retry-After": "Mon, 28 Sep 2020 12:00:00 GMT"}) == 0
+    assert _retry_after({"Retry-After": "Mon, 28 Sep 2099 12:00:00 GMT"}) > 1
+    for value in ["-1", "nan", "infinity", "not a date", "9" * 129]:
+        assert _retry_after({"retry-after": value}) is None

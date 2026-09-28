@@ -29,6 +29,7 @@ _TOKEN = re.compile(r"\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{12,}|githu
 _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
 _URL_USERINFO = re.compile(r"(?i)(https?://)[^\s/@]+:[^\s/@]+@")
 _JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")
+_LINE_ENDINGS = re.compile(r"\r\n|[\n\r\v\f\x1c-\x1e\x85\u2028\u2029]")
 
 
 def validate_endpoint(url: str) -> str:
@@ -58,6 +59,29 @@ def sanitize_excerpt(text: str, secrets: Sequence[str] = ()) -> str:
     text = _TOKEN.sub("[REDACTED]", text)
     text = _JWT.sub("[REDACTED]", text)
     return _ASSIGNMENT.sub(lambda match: match.group(1) + '"[REDACTED]"', text)
+
+
+def sanitize_evidence(text: str, secrets: Sequence[str] = ()) -> str:
+    """Redact evidence without changing any original line's numeric position.
+
+Multiline secrets become a marker followed by the original newline sequence.
+This preserves line identities, including CRLF and Unicode line separators;
+columns inside a redacted span are intentionally not claimed to be unchanged.
+"""
+    if not isinstance(text, str):
+        raise PolicyError("Excerpt must be text")
+
+    def replacement(original: str, marker: str) -> str:
+        return _LINE_ENDINGS.sub("", marker) + "".join(_LINE_ENDINGS.findall(original))
+
+    for secret in sorted((item for item in secrets if isinstance(item, str) and item), key=len, reverse=True):
+        text = text.replace(secret, replacement(secret, "[REDACTED]"))
+    text = _PEM.sub(lambda match: replacement(match.group(), "[REDACTED PRIVATE KEY]"), text)
+    text = _URL_USERINFO.sub(lambda match: replacement(match.group(), match.group(1) + "[REDACTED]@"), text)
+    text = _BEARER.sub(lambda match: replacement(match.group(), "Bearer [REDACTED]"), text)
+    text = _TOKEN.sub(lambda match: replacement(match.group(), "[REDACTED]"), text)
+    text = _JWT.sub(lambda match: replacement(match.group(), "[REDACTED]"), text)
+    return _ASSIGNMENT.sub(lambda match: replacement(match.group(), match.group(1) + '"[REDACTED]"'), text)
 
 
 def sanitize_state(value: Any, secrets: Sequence[str] = (), _depth: int = 0) -> Any:

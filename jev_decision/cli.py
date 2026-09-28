@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from pathlib import Path
 
 from .client import JevClient, _decode
 from .harness_guards import guard_bash_command, prune_tool_output, verify_turn_completion
-from .mcp import MCPServer, local_status, parse_questions
+from .mcp import MCPServer, local_status, parse_questions, selection_options
 
 
 def _print(value):
@@ -15,7 +17,13 @@ def _print(value):
 
 def _input(path):
     if path == "-":
-        value = sys.stdin.read(262145)
+        if hasattr(sys.stdin, "buffer"):
+            raw = sys.stdin.buffer.read(262145)
+            if len(raw) > 262144:
+                raise ValueError("input_limit")
+            value = raw.decode("utf-8-sig")
+        else:
+            value = sys.stdin.read(262145)
     else:
         with open(path, encoding="utf-8-sig") as stream:
             value = stream.read(262145)
@@ -25,7 +33,18 @@ def _input(path):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="jev", description="Managed Jev advisory decisions")
+    parser.add_argument("--runtime-home", help="Absolute shared state directory for this invocation")
     commands = parser.add_subparsers(dest="subcommand", required=True)
+    setup = commands.add_parser("setup", help="Guide credential source, roots, budget and harness selection")
+    setup.add_argument("--non-interactive", action="store_true")
+    setup.add_argument("--credential-source", choices=["env", "dpapi", "keyring"])
+    setup.add_argument("--key-env")
+    setup.add_argument("--workspace", action="append")
+    setup.add_argument("--daily-budget")
+    setup.add_argument("--timezone")
+    setup.add_argument("--harness")
+    setup.add_argument("--scope", choices=["user", "project"])
+    setup.add_argument("--project-root")
     guard = commands.add_parser("guard", help="Assess command risk; never execute or authorize")
     guard.add_argument("command")
     guard.add_argument("--cwd", default="")
@@ -41,10 +60,19 @@ def main(argv=None):
     prune.add_argument("--max-lines", type=int, default=100)
     prune.add_argument("--stats", action="store_true")
     prune.add_argument("--json", action="store_true")
+    prune.add_argument("--mode", choices=["off", "shadow", "select"])
+    prune.add_argument("--source-class", choices=["auto", "unknown", "test_log", "build_log", "application_log", "jsonl", "diff"], default="auto")
     evidence = commands.add_parser("evidence", help="Read an approved saved log before context ingestion")
     evidence.add_argument("--file", required=True)
     evidence.add_argument("--goal", required=True)
     evidence.add_argument("--json", action="store_true")
+    evidence.add_argument("--mode", choices=["off", "shadow", "select"])
+    evidence.add_argument("--source-class", choices=["auto", "unknown", "test_log", "build_log", "application_log", "jsonl", "diff"], default="auto")
+    evidence.add_argument("--start-line", type=int, default=1)
+    evidence.add_argument("--max-lines", type=int, default=1000)
+    evidence.add_argument("--max-bytes", type=int, default=65536)
+    evidence.add_argument("--expected-source-sha256")
+    evidence.add_argument("--workload", help="JSON file identifying the actual harness, version, primary model and provider")
     decide = commands.add_parser("decide", help="Read JSON {state,questions} from file/stdin")
     decide.add_argument("--file", default="-")
     doctor = commands.add_parser("doctor", help="Local checks; --live sends one synthetic budgeted request")
@@ -55,7 +83,10 @@ def main(argv=None):
     auth.add_argument("action", choices=["set", "status"])
     auth.add_argument("--gui", action="store_true")
     harness = commands.add_parser("harness", help="Preview/apply/restore managed harness integration")
-    harness.add_argument("action", choices=["install", "status", "restore"])
+    harness.add_argument("action", choices=["preview", "install", "status", "restore"])
+    harness.add_argument("--target", "--harness", help="A selected harness; omitted uses the saved setup selection")
+    harness.add_argument("--scope", choices=["user", "project"])
+    harness.add_argument("--project-root")
     harness.add_argument("--apply", action="store_true")
     harness.add_argument("--dry-run", action="store_true")
     harness.add_argument("--json", action="store_true")
@@ -63,14 +94,27 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         from .runtime import RuntimeConfig
+        if args.runtime_home:
+            home = Path(args.runtime_home).expanduser()
+            if not home.is_absolute():
+                raise ValueError("absolute_runtime_home_required")
+            os.environ["JEV_HOME"] = str(home.resolve())
         config = RuntimeConfig.load()
+        if args.subcommand == "setup":
+            from .setup import run_setup
+            result = run_setup(interactive=not args.non_interactive, credential_source=args.credential_source,
+                key_env=args.key_env, workspaces=args.workspace, daily_budget=args.daily_budget,
+                timezone=args.timezone, harness=args.harness, scope=args.scope,
+                project_root=args.project_root, config=config)
+            _print(result)
+            return 0 if result.get("status") == "ok" else 2
         if args.subcommand == "mcp":
             MCPServer().run_stdio()
             return 0
         if args.subcommand == "auth":
-            from .credentials import load_api_key, set_api_key_interactive
+            from .credentials import credential_status, set_api_key_interactive
             if args.action == "status":
-                _print({"credential_present": bool(load_api_key(config)), "authenticated": False})
+                _print({**credential_status(config), "authenticated": False})
             elif args.gui:
                 from .auth_gui import main as gui
                 return gui()
@@ -80,7 +124,12 @@ def main(argv=None):
             return 0
         if args.subcommand == "harness":
             from .harnesses import run_harness_command
-            result = run_harness_command(args.action, apply=args.apply and not args.dry_run)
+            target = args.target or config.harness_target
+            if target is None and args.action in {"install", "restore"}:
+                raise ValueError("select_harness_target_required")
+            result = run_harness_command(args.action, apply=args.apply and not args.dry_run,
+                target=target, scope=args.scope or config.harness_scope,
+                project_root=args.project_root or config.project_root, config=config)
             _print(result)
             return 0 if result.get("status") == "ok" else 2
         client = JevClient(runtime=config)
@@ -110,13 +159,18 @@ def main(argv=None):
             result = client.evaluate(data["state"], parse_questions(data["questions"])).to_dict()
         elif args.subcommand == "evidence":
             from .evidence import read_evidence_file
+            options = selection_options(config, args.mode)
+            if args.workload:
+                options["expected_workload"] = _decode(_input(args.workload).encode("utf-8"))
             result = read_evidence_file(args.file, args.goal, config.workspace_roots,
-                client=client, allow_prune=config.pruning_enabled)
+                client=client, source_class=args.source_class, start_line=args.start_line,
+                max_lines=args.max_lines, max_bytes=args.max_bytes,
+                expected_source_sha256=args.expected_source_sha256, **options)
         else:
-            from .policy import sanitize
-            raw = sanitize(_input(args.file))
+            from .policy import sanitize_evidence
+            raw = sanitize_evidence(_input(args.file))
             output, stats = prune_tool_output(raw, args.goal, client=client,
-                allow_prune=config.pruning_enabled, max_retained_lines=args.max_lines)
+                source_class=args.source_class, max_retained_lines=args.max_lines, **selection_options(config, args.mode))
             if not args.json:
                 sys.stdout.write(output)
                 if args.stats:
