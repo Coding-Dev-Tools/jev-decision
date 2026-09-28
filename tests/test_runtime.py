@@ -311,10 +311,12 @@ def test_independent_processes_share_one_cap(isolated_runtime):
     config.save()
     ledger = BudgetLedger(config)
     source = """from jev_decision.budget import BudgetLedger, BudgetError
-ledger = BudgetLedger()
+ledger = None
 accepted = 0
 for _ in range(16):
     try:
+        if ledger is None:
+            ledger = BudgetLedger()
         ledger.reserve()
         accepted += 1
     except BudgetError:

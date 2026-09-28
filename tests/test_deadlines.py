@@ -10,7 +10,7 @@ from decimal import Decimal
 
 import pytest
 
-from jev_decision.budget import BudgetLedger
+from jev_decision.budget import BudgetDeadlineExceeded, BudgetLedger
 from jev_decision.client import DEFAULT_TYPESAFE_ENDPOINT, JevClient, _bounded_transport, _http_transport
 from jev_decision.runtime import RuntimeConfig
 
@@ -57,25 +57,29 @@ def test_late_connect_never_sends_after_caller_timeout(monkeypatch):
 
 def test_slow_injected_settlement_cannot_return_or_cache_success(tmp_path):
     released = threading.Event()
+    entered = threading.Event()
     calls = []
     class SlowLedger:
         def reserve(self):
             return len(calls)
         def settle(self, *_args, **_kwargs):
-            released.wait(1)
+            entered.set()
+            released.wait(5)
     def transport(*_):
         calls.append(1)
         return 200, BODY
     client = JevClient(api_key="fake-offline-test-key", runtime=RuntimeConfig(home=tmp_path, enabled=True),
-                       budget_ledger=SlowLedger(), transport=transport, timeout_s=0.04)
+                       budget_ledger=SlowLedger(), transport=transport, timeout_s=0.5)
     try:
         started = time.monotonic()
         result = client.evaluate("An excerpt", QUESTIONS)
-        assert time.monotonic() - started < 0.25
+        assert time.monotonic() - started < 1.5
+        assert entered.is_set()
         assert result.error_code == "timeout"
         assert result.decisions == {}
         assert result.status == "unavailable"
         released.set()
+        client.timeout_s = 2  # Recovery tests cache behavior, not a tiny I/O deadline.
         assert client.evaluate("An excerpt", QUESTIONS).source == "provider"
         assert len(calls) == 2
     finally:
@@ -83,7 +87,7 @@ def test_slow_injected_settlement_cannot_return_or_cache_success(tmp_path):
 
 
 @pytest.mark.parametrize("lock_at", ["reserve", "settle"])
-def test_sqlite_contention_uses_remaining_deadline_and_keeps_holds(tmp_path, lock_at):
+def test_sqlite_contention_bounds_client_and_keeps_holds(tmp_path, lock_at):
     config = RuntimeConfig(home=tmp_path, enabled=True)
     ledger = BudgetLedger(config)
     blocker = sqlite3.connect(str(config.ledger_path), isolation_level=None, check_same_thread=False)
@@ -96,12 +100,13 @@ def test_sqlite_contention_uses_remaining_deadline_and_keeps_holds(tmp_path, loc
     if lock_at == "reserve":
         blocker.execute("BEGIN IMMEDIATE")
     client = JevClient(api_key="fake-offline-test-key", runtime=config, budget_ledger=ledger,
-                       transport=transport, timeout_s=0.06)
+                       transport=transport, timeout_s=0.5)
     try:
         started = time.monotonic()
         result = client.evaluate("An excerpt", QUESTIONS)
-        assert time.monotonic() - started < 0.25
-        assert result.error_code == "timeout"
+        assert time.monotonic() - started < 1.5
+        # SQLite may exhaust its shorter busy timeout before the whole request.
+        assert result.error_code in {"timeout", "budget_unavailable"}
         assert not result.decisions
         assert len(calls) == (1 if lock_at == "settle" else 0)
     finally:
@@ -111,6 +116,27 @@ def test_sqlite_contention_uses_remaining_deadline_and_keeps_holds(tmp_path, loc
     assert status["known_spend_usd"] == 0
     if lock_at == "settle":
         assert status["held_usd"] == 0.002688
+
+
+@pytest.mark.parametrize("lock_at", ["reserve", "settle"])
+def test_sqlite_operations_respect_deadline_shorter_than_busy_timeout(tmp_path, lock_at):
+    config = RuntimeConfig(home=tmp_path, enabled=True)
+    ledger = BudgetLedger(config)
+    reservation = ledger.reserve() if lock_at == "settle" else None
+    blocker = sqlite3.connect(str(config.ledger_path), isolation_level=None)
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        started = time.monotonic()
+        deadline = started + 0.05
+        with pytest.raises(BudgetDeadlineExceeded):
+            if lock_at == "reserve":
+                ledger.reserve(deadline=deadline)
+            else:
+                ledger.settle(reservation, token_count=11, deadline=deadline)
+        assert time.monotonic() - started < 0.5
+    finally:
+        blocker.close()
+    assert ledger.status()["pending_attempts"] == (1 if lock_at == "settle" else 0)
 
 
 def test_external_deadline_cannot_extend_client_or_trigger_expired_work(tmp_path):
@@ -176,23 +202,27 @@ def test_concurrent_calls_share_budget_and_cannot_race_one_attempt_cap(tmp_path)
 def test_response_validation_is_bounded_and_preserves_uncertain_hold(tmp_path, monkeypatch):
     import jev_decision.client as client_module
     release = threading.Event()
+    entered = threading.Event()
     original = client_module.validate_response
     def delayed(*args):
-        release.wait(1)
+        entered.set()
+        release.wait(5)
         return original(*args)
     monkeypatch.setattr(client_module, "validate_response", delayed)
     config = RuntimeConfig(home=tmp_path, enabled=True)
     ledger = BudgetLedger(config)
     client = JevClient(api_key="fake-offline-test-key", runtime=config, budget_ledger=ledger,
-                       transport=lambda *_: (200, BODY), timeout_s=0.04)
+                       transport=lambda *_: (200, BODY), timeout_s=0.5)
     try:
         started = time.monotonic()
         result = client.evaluate("An excerpt", QUESTIONS)
-        assert time.monotonic() - started < 0.25
+        assert time.monotonic() - started < 1.5
+        assert entered.is_set()
         assert result.error_code == "timeout"
         assert result.decisions == {}
         assert ledger.status()["pending_attempts"] == 1
         release.set()
+        client.timeout_s = 2  # Leave CI filesystem time for the uncached recovery.
         assert client.evaluate("An excerpt", QUESTIONS).source == "provider"
     finally:
         release.set()

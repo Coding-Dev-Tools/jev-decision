@@ -4,7 +4,7 @@ The source validation on 2026-09-28 used Windows, Python 3.12.10, Node 24.15.0 a
 
 | Check | Observed result |
 | --- | --- |
-| Full Python suite | 353 passed, 1 skipped (Windows symlink privilege) |
+| Full Python suite | 355 passed, 1 skipped (Windows symlink privilege) |
 | TypeScript build + Node suite | 81 passed |
 | Shared Python/TypeScript fixtures | Passed against compiled TypeScript |
 | Actual stdio subprocess | Legacy handshake, automatic discovery and 2026-07-28 passed; separate 2024-11-05 negotiation passed |
