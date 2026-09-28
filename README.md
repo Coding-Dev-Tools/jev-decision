@@ -73,6 +73,8 @@ else:
 
 Runnable JSON examples: [classification](examples/classify.json), [evidence relevance](examples/relevance.json), [routing](examples/route.json), and [verification gaps](examples/verification-gap.json). Run `jev decide --file examples/route.json` after setup. Skip Jev when a deterministic rule or test already answers the question.
 
+Use non-sensitive question IDs. Recognizable secrets in IDs are redacted before transmission, and redaction collisions reject the request. Successful results restore the caller's original IDs, including cached results; those IDs are intentionally part of the local result.
+
 Choice supports native null descriptions. Score uses 2–10 ordered descriptive levels and preserves fractional values and legends. Noul returns a probability; separate confidence is unknown. Missing usage stays `null`. Python and TypeScript share contract fixtures, including valid provider probability rounding.
 
 ## Evidence before model ingestion

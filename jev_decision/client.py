@@ -590,25 +590,29 @@ class JevClient:
             return finish("invalid_request")
         if time.monotonic() >= deadline:
             return finish("timeout")
-        def prepare() -> Tuple[Dict[str, Any], bytes]:
-            from .policy import sanitize_state
+        def prepare() -> Tuple[Dict[str, Any], Dict[str, str], bytes]:
+            from .policy import sanitize_excerpt, sanitize_state
 
             validate_state(state)
             checked = normalize_questions(questions)
             # Sanitize all string-bearing request values, including instructions.
             clean_state = sanitize_state(state, secrets=(self._api_key,))
-            checked = normalize_questions({
-                question_id: sanitize_state(question, secrets=(self._api_key,))
-                for question_id, question in checked.items()
-            })
+            wire_questions, original_ids = {}, {}
+            for question_id, question in checked.items():
+                wire_id = sanitize_excerpt(question_id, secrets=(self._api_key,))
+                if wire_id in original_ids:
+                    raise ValueError("ambiguous_question_ids")
+                original_ids[wire_id] = question_id
+                wire_questions[wire_id] = sanitize_state(question, secrets=(self._api_key,))
+            checked = normalize_questions(wire_questions)
             validate_state(clean_state)
             body = json.dumps(
                 {"model": requested_model, "state": clean_state, "questions": checked},
                 ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True,
             ).encode("utf-8")
-            return checked, body
+            return checked, original_ids, body
         try:
-            checked, body = _bounded_call(prepare, deadline)
+            checked, original_ids, body = _bounded_call(prepare, deadline)
         except TimeoutError:
             return finish("timeout")
         except Exception:
@@ -618,6 +622,12 @@ class JevClient:
         escaped_key = json.dumps(self._api_key, ensure_ascii=False)[1:-1].encode("utf-8")
         if self._api_key.encode("utf-8") in body or escaped_key in body:
             return finish("credential_in_payload")
+
+        def restore_ids() -> DecisionBatch:
+            for wire_id, decision in batch.decisions.items():
+                decision.id = original_ids[wire_id]
+            batch.decisions = {original_ids[key]: value for key, value in batch.decisions.items()}
+            return batch
 
         fingerprint = hashlib.sha256(body).digest()
         with self._cache_lock:
@@ -629,6 +639,7 @@ class JevClient:
                 batch.attempts = 0
                 batch.request_id = str(uuid.uuid4())
                 batch.usage = {"input_tokens": 0, "output_tokens": 0}
+                restore_ids()
                 return finish()
 
         # Leave room for the bounded SQLite settlement after HTTP completes.
@@ -737,7 +748,9 @@ class JevClient:
                         self._cache.move_to_end(fingerprint)
                         while len(self._cache) > self._cache_size:
                             self._cache.popitem(last=False)
-                return batch
+                # Cache only wire IDs; each caller receives its own original IDs,
+                # even when different redacted identifiers share a payload.
+                return restore_ids()
             delay = max(random.uniform(0.05, 0.1), retry_after or 0.0)
             if not retryable or attempt or deadline - time.monotonic() <= delay:
                 return finish(error)

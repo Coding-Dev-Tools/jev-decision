@@ -74,4 +74,4 @@ jobs:
         with:
           python-version: "3.12"
       - run: python -m pip install -e ".[test]"
-      - run: python -m pytest tests/test_parity.py -q
+      - run: python -m pytest tests/test_parity.py tests/test_question_ids.py -q

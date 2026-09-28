@@ -178,7 +178,11 @@ class DecisionBatch:
         return decision if isinstance(decision, ScoreDecision) else None
 
     def to_dict(self) -> Dict[str, Any]:
-        """Return the public result without input text, credentials, or raw bodies."""
+        """Return decisions under caller IDs, excluding state and raw bodies.
+
+        IDs intentionally preserve caller input; callers should use non-sensitive
+        correlation labels even though recognizable secrets are redacted on wire.
+        """
         decisions = {}
         for question_id, decision in self.decisions.items():
             value = asdict(decision)

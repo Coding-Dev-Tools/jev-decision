@@ -47,6 +47,13 @@ Reported two-decimal probabilities are accepted only when their rounding interva
 permit total probability one and a compatible score. Returned scores and
 probabilities retain the provider's values; they are never renormalized.
 
+Question IDs are local correlation labels. Recognizable secrets and the configured
+API key are redacted from IDs before transmission; ambiguous redacted IDs reject
+the request. Successful results restore your original IDs, including cache hits
+and concurrent calls. Use non-sensitive IDs because results intentionally retain
+them. This safeguard does not sanitize TypeScript state, prompts or criteria;
+your application remains responsible for preparing those fields for disclosure.
+
 Results use the same snake_case status contract as Python: `status`, `source`,
 `decisions`, `requested_model`, `resolved_model`, `usage`, `latency_ms`, `attempts`,
 `request_id`, `error_code`, and `is_fallback`. Missing credentials, failed requests,

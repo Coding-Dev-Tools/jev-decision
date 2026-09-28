@@ -37,6 +37,56 @@ const batch = (decisions, status = "ok") => ({
   request_id: "fixture", error_code: status === "ok" ? null : "missing_key", is_fallback: false,
 });
 
+test("shared question-ID redaction and collision corpus", async () => {
+  await require("./question-id-runner.cjs").runCorpus();
+});
+
+test("wire-ID cache and concurrent aliases retain each caller's original IDs", async () => {
+  let calls = 0;
+  let release;
+  const responseReady = new Promise(resolve => { release = resolve; });
+  const client = new JevClient({ apiKey: "test-credential", fetchImpl: async (_url, init) => {
+    calls++;
+    const ids = Object.keys(JSON.parse(init.body).questions);
+    await responseReady;
+    return jsonResponse({ model: DEFAULT_MODEL, answers: Object.fromEntries(ids.map(id => [id, { type: "noul", noul: 0.75 }])) });
+  } });
+  const question = id => [{ id, type: "noul", prompt: "Assess the evidence" }];
+  const firstQuestions = question("password=first");
+  const firstPending = client.evaluate("Example evidence", firstQuestions);
+  const secondPending = client.evaluate("Example evidence", question("password=second"));
+  firstQuestions[0].id = "caller-mutated-after-send";
+  release();
+  const [first, second] = await Promise.all([firstPending, secondPending]);
+  assert.deepEqual(Object.keys(first.decisions), ["password=first"]);
+  assert.deepEqual(Object.keys(second.decisions), ["password=second"]);
+  assert.equal(second.source, "cache");
+  assert.equal(second.attempts, 0);
+  assert.deepEqual(second.usage, { input_tokens: 0, output_tokens: 0 });
+  first.decisions["password=first"].probability = 0;
+  second.decisions["password=second"].probability = 0;
+  const third = await client.evaluate("Example evidence", question("password=third"));
+  assert.deepEqual(Object.keys(third.decisions), ["password=third"]);
+  assert.equal(third.decisions["password=third"].probability, 0.75);
+  assert.equal(third.source, "cache");
+  assert.equal(calls, 1);
+});
+
+test("original question IDs in provider replies fail validation before remapping", async () => {
+  let calls = 0;
+  const original = "password=fixture";
+  const client = new JevClient({ apiKey: "test-credential", fetchImpl: async () => {
+    calls++;
+    return jsonResponse({ model: DEFAULT_MODEL, answers: { [original]: { type: "noul", noul: 0.75 } } });
+  } });
+  for (let index = 0; index < 2; index++) {
+    const result = await client.evaluate("Example evidence", [{ id: original, type: "noul", prompt: "Assess the evidence" }]);
+    assertUnavailable(result, "invalid_response");
+    assert(!JSON.stringify(result).includes(original));
+  }
+  assert.equal(calls, 2);
+});
+
 test("canonical payload, pinned model, fractional score and Noul confidence parity", async () => {
   let seen;
   const client = new JevClient({ apiKey: "test-credential", fetchImpl: async (url, init) => {

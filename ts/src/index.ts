@@ -124,6 +124,32 @@ function assertId(value: unknown): asserts value is string {
   if (typeof value !== "string" || !value.trim() || value.length > 200) fail("invalid_request");
 }
 
+// Python re uses Unicode whitespace/word boundaries and its case-insensitive
+// Latin ranges include dotted/dotless I, long S and the Kelvin sign. Define that
+// policy explicitly rather than silently changing it with JavaScript's \s/\b/i.
+const ID_WHITESPACE = "\\x09-\\x0d\\x1c-\\x20\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
+const ID_WORD = "\\p{L}\\p{N}_";
+const ID_WORD_BOUNDARY = `(?:(?<=[${ID_WORD}])(?![${ID_WORD}])|(?<![${ID_WORD}])(?=[${ID_WORD}]))`;
+const ID_SECRET_NAMES = "typesafe_api_key|jev_api_key|api[_-]?key|api[_-]?token|secret|password|passwd|authorization|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|aws_secret_access_key"
+  .replace(/[iks]/g, letter => ({ i: "[iİı]", k: "[kK]", s: "[sſ]" })[letter]!);
+const ID_URL_USERINFO = new RegExp(`(http[sſ]?://)[^${ID_WHITESPACE}/@]+:[^${ID_WHITESPACE}/@]+@`, "giu");
+const ID_BEARER = new RegExp(`(?<![${ID_WORD}])Bearer[${ID_WHITESPACE}]+[A-Za-zİı0-9._~+/=-]+`, "giu");
+const ID_TOKEN = new RegExp(`(?<![${ID_WORD}])(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,})${ID_WORD_BOUNDARY}`, "gu");
+const ID_JWT = new RegExp(`(?<![${ID_WORD}])eyJ[A-Za-z0-9_-]{5,}\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+${ID_WORD_BOUNDARY}`, "gu");
+const ID_ASSIGNMENT = new RegExp(`(["']?(?:${ID_SECRET_NAMES})["']?[${ID_WHITESPACE}]*[:=][${ID_WHITESPACE}]*)(?:"(?:\\\\[^\\n]|[^"\\\\])*"|'(?:\\\\[^\\n]|[^'\\\\])*'|[^${ID_WHITESPACE},;}\\]]+)`, "giu");
+
+/** Match the Python wire-ID safeguards; original IDs stay local to this call. */
+function sanitizeQuestionId(value: string, secret?: string): string {
+  if (secret) value = value.split(secret).join("[REDACTED]");
+  return value
+    .replace(/-----BEGIN (?:[A-Z0-9 ]*PRIVATE KEY)-----[\s\S]*?-----END (?:[A-Z0-9 ]*PRIVATE KEY)-----/g, "[REDACTED PRIVATE KEY]")
+    .replace(ID_URL_USERINFO, "$1[REDACTED]@")
+    .replace(ID_BEARER, "Bearer [REDACTED]")
+    .replace(ID_TOKEN, "[REDACTED]")
+    .replace(ID_JWT, "[REDACTED]")
+    .replace(ID_ASSIGNMENT, '$1"[REDACTED]"');
+}
+
 /** Check JSON without invoking custom toJSON methods or accepting undefined/NaN. */
 function validateJson(value: unknown, limit: number, error: ErrorCode): void {
   const ancestors = new Set<object>();
@@ -460,9 +486,17 @@ export class JevClient implements JevEvaluator {
     let body: string;
     let canonical: Record<string, NativeQuestion>;
     let hash: string;
+    const originalIds = new Map<string, string>();
     try {
       if (model !== DEFAULT_MODEL || !((typeof state === "string" && state.trim()) || (Array.isArray(state) && state.length) || (isRecord(state) && Object.keys(state).length))) fail("invalid_request");
-      const payload = { model: DEFAULT_MODEL, state, questions: normalizeQuestions(questions) };
+      const wireQuestions = Object.fromEntries(Object.entries(normalizeQuestions(questions)).map(([id, question]) => {
+        const wireId = sanitizeQuestionId(id, this.#apiKey);
+        assertId(wireId);
+        if (originalIds.has(wireId)) fail("invalid_request");
+        originalIds.set(wireId, id);
+        return [wireId, question];
+      }));
+      const payload = { model: DEFAULT_MODEL, state, questions: wireQuestions };
       validateJson(payload, MAX_REQUEST_BYTES, "invalid_request");
       body = JSON.stringify(payload);
       if (Buffer.byteLength(body, "utf8") > MAX_REQUEST_BYTES) fail("request_too_large");
@@ -476,8 +510,13 @@ export class JevClient implements JevEvaluator {
     if (this.#offlineMode) return unavailable(requestId, started, "offline");
     if (!this.isConfigured) return unavailable(requestId, started, "missing_key");
     if (performance.now() - started >= this.#timeoutMs) return unavailable(requestId, started, "timeout");
+    // Cache/in-flight entries retain wire IDs so aliases cannot return a previous
+    // caller's identifier. Never mutate a batch shared with another invocation.
+    const restoreIds = (batch: DecisionBatch): DecisionBatch => ({
+      ...structuredClone(batch), decisions: Object.fromEntries(Object.entries(batch.decisions).map(([id, decision]) => [originalIds.get(id)!, structuredClone(decision)])),
+    });
     const fromCache = (batch: DecisionBatch): DecisionBatch => ({
-      ...structuredClone(batch), source: "cache", usage: { input_tokens: 0, output_tokens: 0 },
+      ...restoreIds(batch), source: "cache", usage: { input_tokens: 0, output_tokens: 0 },
       attempts: 0, request_id: requestId, latency_ms: Math.max(0, performance.now() - started),
     });
     if (this.#cacheEnabled) {
@@ -501,7 +540,7 @@ export class JevClient implements JevEvaluator {
         this.#cache.set(hash, structuredClone(batch));
         if (this.#cache.size > 128) this.#cache.delete(this.#cache.keys().next().value!);
       }
-      return batch;
+      return restoreIds(batch);
     } finally { if (this.#cacheEnabled) this.#inFlight.delete(hash); }
   }
 
