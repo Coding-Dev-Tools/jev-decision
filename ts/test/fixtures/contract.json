@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "state": {"task": "Assess the relevance of sanitized evidence", "excerpt": "The fixture includes a specific reproduction and verified output."},
+  "questions": {
+    "relevant": {"type": "noul", "instructions": "Does the evidence directly address the stated task?"},
+    "route": {"type": "choice", "instructions": "Choose an evidence handling route.", "criteria": {"inspect": "Inspect directly relevant evidence", "ignore": "Ignore unrelated background evidence"}},
+    "quality": {"type": "score", "instructions": "Rate the quality of this evidence.", "criteria": ["Unsupported assertion", "Partial evidence", "Direct verified evidence"]}
+  },
+  "response": {
+    "model": "jev-1.13.0",
+    "answers": {
+      "relevant": {"type": "noul", "noul": 0.85},
+      "route": {"type": "choice", "choice": "inspect", "confidence": 0.9, "probabilities": {"inspect": 0.8, "ignore": 0.2}},
+      "quality": {"type": "score", "score": 1.7, "confidence": 0.75, "legend": {"0": "Unsupported assertion", "1": "Partial evidence", "2": "Direct verified evidence"}, "probabilities": {"0": 0.1, "1": 0.1, "2": 0.8}}
+    },
+    "usage": {"input_tokens": 123, "output_tokens": 15}
+  },
+  "expected_ok": {
+    "status": "ok",
+    "source": "provider",
+    "requested_model": "jev-1.13.0",
+    "resolved_model": "jev-1.13.0",
+    "decisions": {
+      "relevant": {"type": "noul", "probability": 0.85, "confidence": null},
+      "route": {"type": "choice", "selected": "inspect", "confidence": 0.9, "probabilities": {"inspect": 0.8, "ignore": 0.2}},
+      "quality": {"type": "score", "score": 1.7, "confidence": 0.75, "legend": {"0": "Unsupported assertion", "1": "Partial evidence", "2": "Direct verified evidence"}, "probabilities": {"0": 0.1, "1": 0.1, "2": 0.8}}
+    },
+    "usage": {"input_tokens": 123, "output_tokens": 15},
+    "attempts": 1,
+    "error_code": null,
+    "is_fallback": false
+  },
+  "expected_unavailable": {
+    "status": "unavailable",
+    "source": "none",
+    "requested_model": "jev-1.13.0",
+    "resolved_model": null,
+    "decisions": {},
+    "usage": {"input_tokens": null, "output_tokens": null},
+    "attempts": 1,
+    "error_code": "invalid_response",
+    "is_fallback": false
+  },
+  "cases": [
+    {"name": "mixed_valid", "patches": [], "expected": "ok"},
+    {"name": "usage_missing", "patches": [{"op": "remove", "path": ["usage"]}], "expected": "ok", "expected_overrides": {"usage": {"input_tokens": null, "output_tokens": null}}},
+    {"name": "usage_partial_unknown", "patches": [{"op": "set", "path": ["usage"], "value": {"input_tokens": 0, "output_tokens": "unknown", "cost_usd": 0.123}}], "expected": "ok", "expected_overrides": {"usage": {"input_tokens": 0, "output_tokens": null}}},
+    {"name": "unknown_top_level_fields_are_not_returned", "patches": [{"op": "set", "path": ["internal_debug"], "value": "provider-body-must-not-be-returned"}], "expected": "ok"},
+    {"name": "noul_confidence_is_not_a_wire_field", "patches": [{"op": "set", "path": ["answers", "relevant", "confidence"], "value": 1}], "expected": "unavailable"},
+    {"name": "answer_extra_field", "patches": [{"op": "set", "path": ["answers", "quality", "debug"], "value": "provider-body-must-not-be-returned"}], "expected": "unavailable"},
+    {"name": "missing_answer", "patches": [{"op": "remove", "path": ["answers", "route"]}], "expected": "unavailable"},
+    {"name": "mismatched_model", "patches": [{"op": "set", "path": ["model"], "value": "jev-latest"}], "expected": "unavailable", "expected_overrides": {"error_code": "model_mismatch"}},
+    {"name": "distribution_does_not_sum_to_one", "patches": [{"op": "set", "path": ["answers", "route", "probabilities", "inspect"], "value": 0.5}], "expected": "unavailable"},
+    {"name": "score_legend_mismatch", "patches": [{"op": "set", "path": ["answers", "quality", "legend", "0"], "value": "Unrequested score level"}], "expected": "unavailable"},
+    {"name": "duplicate_decoded_json_key", "patches": [], "raw_response": "{\"model\":\"jev-1.13.0\",\"\\u006dodel\":\"jev-1.13.0\",\"answers\":{}}", "expected": "unavailable"}
+  ]
+}

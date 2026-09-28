@@ -1,24 +1,25 @@
 {
   "name": "@coding-dev-tools/jev-decision",
-  "version": "0.2.0",
-  "description": "Zero-dependency System 1 decision engine and guardrails for Jev (TypeSafe AI) in TypeScript",
+  "version": "0.3.0",
+  "description": "Strict typed advisory TypeSafe API client; managed harness controls use the Python runtime",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
-    "test": "node --test dist/**/*.test.js"
+    "test": "npm run build && node --test test/client.test.cjs"
   },
   "keywords": [
     "jev",
     "typesafe-ai",
     "system-1",
     "ai-agents",
-    "guardrails",
-    "token-optimization",
+    "advisory-decisions",
     "mcp"
   ],
   "author": "Coding-Dev-Tools",
   "license": "MIT",
+  "engines": { "node": ">=20" },
+  "files": ["dist/index.js", "dist/index.d.ts", "README.md"],
   "devDependencies": {
     "typescript": "^5.4.0",
     "@types/node": "^20.0.0"

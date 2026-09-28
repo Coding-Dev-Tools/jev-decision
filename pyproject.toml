@@ -4,10 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jev-decision"
-version = "0.2.0"
-description = "Zero-dependency System 1 decision engine, calibrated guardrails, MCP server, and token optimization client for Jev (TypeSafe AI)"
+version = "0.3.0"
+description = "Budgeted advisory Jev decisions, protected credentials, evidence selection and multi-harness MCP integration"
 readme = "README.md"
 requires-python = ">=3.9"
+dependencies = ["tomli>=2,<3; python_version < '3.11'"]
 authors = [{ name = "Coding-Dev-Tools & Agent Ecosystem" }]
 license = { text = "MIT" }
 classifiers = [
@@ -23,3 +24,21 @@ jev-mcp = "jev_decision.mcp:main"
 
 [project.optional-dependencies]
 test = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["jev_decision*"]
+
+[tool.setuptools.package-data]
+jev_decision = ["resources/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py39"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
+ignore = ["E501"]

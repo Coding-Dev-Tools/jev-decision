@@ -4,7 +4,7 @@ Zero-dependency client, typed primitives, calibration profiles, and
 high-speed agent guardrails for Jev (TypeSafe AI).
 """
 
-from .client import JevClient
+from .client import DEFAULT_MODEL, JevClient, normalize_questions, validate_response, validate_state
 from .fallback import evaluate_heuristics
 from .harness_guards import (
     classify_memory_relation,
@@ -13,11 +13,11 @@ from .harness_guards import (
     verify_turn_completion,
 )
 from .primitives import (
+    DEFAULT_CALIBRATION,
     CalibrationTier,
     ChoiceDecision,
     ChoiceQuestion,
     DecisionBatch,
-    DEFAULT_CALIBRATION,
     NoulDecision,
     NoulQuestion,
     Question,
@@ -26,9 +26,13 @@ from .primitives import (
     ScoreQuestion,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.3.0"
 __all__ = [
     "JevClient",
+    "DEFAULT_MODEL",
+    "normalize_questions",
+    "validate_response",
+    "validate_state",
     "NoulQuestion",
     "ChoiceQuestion",
     "ScoreQuestion",
@@ -39,6 +43,7 @@ __all__ = [
     "CalibrationTier",
     "DEFAULT_CALIBRATION",
     "QuestionType",
+    "Question",
     "evaluate_heuristics",
     "guard_bash_command",
     "prune_tool_output",

@@ -8,3 +8,8 @@ __pycache__/
 .venv/
 venv/
 .env
+build/
+dist/
+ts/node_modules/
+ts/dist/
+.coverage

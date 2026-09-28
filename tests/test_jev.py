@@ -1,187 +1,115 @@
-"""Unit tests for jev_decision primitives, fallbacks, live mock server, and harness guardrails."""
-
-import json
-import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
+"""Regressions for advisory authority and evidence preservation."""
 import pytest
 
-from jev_decision import (
-    CalibrationTier,
-    ChoiceQuestion,
-    JevClient,
-    NoulQuestion,
-    ScoreQuestion,
-    classify_memory_relation,
+from jev_decision import DecisionBatch, JevClient, ScoreDecision
+from jev_decision.evidence import read_evidence_file
+from jev_decision.harness_guards import (
     guard_bash_command,
     prune_tool_output,
     verify_turn_completion,
 )
 
 
-def test_primitives_serialization():
-    nq = NoulQuestion(id="q1", prompt="Is this safe?")
-    cq = ChoiceQuestion(id="q2", prompt="Choose category", options=["a", "b", "c"])
-    sq = ScoreQuestion(id="q3", prompt="Rate relevance", scale=[0, 1, 2, 3, 4])
+class Scorer:
+    def __init__(self, score=0.0, confidence=1.0, status="ok"):
+        self.calls = []
+        self.score, self.confidence, self.status = score, confidence, status
+    def evaluate(self, state, questions):
+        self.calls.append((state, questions))
+        return DecisionBatch(status=self.status, source="provider" if self.status == "ok" else "none",
+            decisions={q.id: ScoreDecision(q.id, self.score, {}, self.confidence) for q in questions})
 
-    assert nq.to_dict() == {"id": "q1", "type": "noul", "prompt": "Is this safe?"}
-    assert cq.to_dict() == {"id": "q2", "type": "choice", "prompt": "Choose category", "options": ["a", "b", "c"]}
-    assert sq.to_dict() == {"id": "q3", "type": "score", "prompt": "Rate relevance", "scale": [0, 1, 2, 3, 4]}
+def test_missing_key_is_unavailable_not_safe():
+    client = JevClient(api_key="")
+    result = guard_bash_command("git status; delete-something", client=client)
+    assert result["status"] == "unavailable"
+    assert result["risk_probability"] is None
+    assert "allow_auto" not in result
+    assert result["permission_authority"] == "native_harness"
 
+def test_intentions_do_not_certify_unexecuted_tests():
+    result = verify_turn_completion("Ensure all tests passed", "edited file.py", "Tests not run yet",
+                                    client=JevClient(offline_mode=True))
+    assert result["status"] == "offline"
+    assert "is_complete" not in result
+    assert result["support_probability"] is None
 
-def test_offline_fallback_safe_bash():
-    client = JevClient(offline_mode=True)
+def test_explicit_offline_never_fabricates_provider_results():
+    batch = JevClient(offline_mode=True).evaluate("sample", {"q": {"type":"noul","instructions":"Is this text?"}})
+    assert batch.status == "offline"
+    assert batch.source != "provider"
+    assert not batch.decisions
 
-    # Safe command: git status
-    res = guard_bash_command("git status", cwd="/repo", client=client)
-    assert res["allow_auto"] is True
-    assert res["escalate_to_user"] is False
-    assert res["safety_probability"] >= 0.95
-    assert res["is_fallback"] is True
+def test_windows_are_complete_batched_and_original_unchanged():
+    raw = "".join("boilerplate line %d %s\n" % (i, "z" * 20) for i in range(125))
+    client = Scorer()
+    output, stats = prune_tool_output(raw, "find useful information", client=client, max_retained_lines=30)
+    assert output == raw
+    assert len(client.calls) == 1
+    state, questions = client.calls[0]
+    assert "".join(window["text"] for window in state["windows"].values()) == raw
+    assert len(questions) == 5
+    assert not stats["pruned"]
+    assert "token_savings_est" not in stats
 
-    # Safe command: pytest
-    res2 = guard_bash_command("pytest tests/test_core.py", client=client)
-    assert res2["allow_auto"] is True
-    assert res2["safety_probability"] >= 0.95
+def test_protected_failure_and_summary_spans_survive_qualified_pruning():
+    lines = ["boilerplate %d xxxxxxxxxxxxxxxxxx\n" % i for i in range(125)]
+    lines[55] = "AssertionError: required result missing\n"
+    lines[82] = "45 tests passed; exit code 0\n"
+    raw = "".join(lines)
+    output, stats = prune_tool_output(raw, "debug issue", client=Scorer(), max_retained_lines=30, allow_prune=True)
+    assert lines[55] in output and lines[82] in output
+    assert lines[0] in output and lines[-1] in output
+    assert stats["saved_lines"] == 25
+    assert "source lines 26-50" in output
 
+@pytest.mark.parametrize("client", [Scorer(confidence=0.2), Scorer(score=1.5), Scorer(status="unavailable")])
+def test_uncertainty_retains_every_line(client):
+    raw = "".join("ordinary record %d xxxxxxxxxxxx\n" % i for i in range(125))
+    output, stats = prune_tool_output(raw, "inspect", client=client, allow_prune=True)
+    assert output == raw
+    assert not stats["pruned"]
 
-def test_offline_fallback_destructive_bash():
-    client = JevClient(offline_mode=True)
+def test_large_windows_not_silently_truncated():
+    raw = "x" * 15000 + "\n" + "line\n" * 125
+    client = Scorer()
+    output, stats = prune_tool_output(raw, "inspect", client=client, allow_prune=True)
+    assert output == raw and not client.calls
+    assert stats["status"] == "retained_input_limit"
 
-    # Obvious destructive command: rm -rf /
-    res = guard_bash_command("rm -rf / --no-preserve-root", client=client)
-    assert res["allow_auto"] is False
-    assert res["escalate_to_user"] is True
-    assert res["safety_probability"] <= 0.05
+def test_file_evidence_redacts_and_preserves_source(tmp_path):
+    original = b"api_key=secret-test-value\nbuild information\n"
+    path = tmp_path / "build.log"
+    path.write_bytes(original)
+    result = read_evidence_file(str(path), "inspect", [str(tmp_path)], client=Scorer())
+    assert "secret-test-value" not in result["output"]
+    assert result["redacted"]
+    assert path.read_bytes() == original
 
-    # Force push
-    res_push = guard_bash_command("git push origin main --force", client=client)
-    assert res_push["allow_auto"] is False
-    assert res_push["escalate_to_user"] is True
+def test_file_evidence_denies_secrets_and_escape(tmp_path):
+    for name in [".env", "credentials.json", "private.key"]:
+        path = tmp_path / name
+        path.write_text("content")
+        with pytest.raises(ValueError):
+            read_evidence_file(str(path), "inspect", [str(tmp_path)])
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    approved = tmp_path / "approved"
+    approved.mkdir()
+    target = outside / "build.log"
+    target.write_text("content")
+    with pytest.raises(ValueError, match="outside_approved"):
+        read_evidence_file(str(approved / ".." / "outside" / "build.log"), "inspect", [str(approved)])
 
-
-def test_context_pruning():
-    client = JevClient(offline_mode=True)
-
-    # 200 lines of repetitive output
-    lines = [f"Passing test item {i}: ok" for i in range(200)]
-    raw_output = "\n".join(lines)
-
-    pruned, stats = prune_tool_output(raw_output, current_goal="fix auth bug", client=client, max_retained_lines=50)
-    assert stats["pruned"] is True
-    assert stats["saved_lines"] > 0
-    assert "lines of boilerplate/passing output omitted" in pruned
-
-
-def test_verification_completion():
-    client = JevClient(offline_mode=True)
-
-    # State with failure
-    res_fail = verify_turn_completion(
-        goal="Fix issue #123",
-        recent_actions="edited file.py",
-        last_output="AssertionError: 2 != 3",
-        client=client,
-    )
-    assert res_fail["is_complete"] is False
-
-    # State with all checks passed
-    res_ok = verify_turn_completion(
-        goal="Fix issue #123",
-        recent_actions="ran test",
-        last_output="100% green, 45 passed in 0.2s",
-        client=client,
-    )
-    assert res_ok["is_complete"] is True
-
-
-def test_memory_relation_classification():
-    client = JevClient(offline_mode=True)
-
-    # Contradiction with negation
-    rel1 = classify_memory_relation(
-        new_fact="Do not use Postgres, use SQLite now",
-        existing_memory="Use Postgres for primary database",
-        client=client,
-    )
-    assert "contradict" in rel1
-
-    # Reinforcement
-    rel2 = classify_memory_relation(
-        new_fact="Engraphis stores memories in SQLite tables",
-        existing_memory="SQLite database is used for local memory storage in Engraphis",
-        client=client,
-    )
-    assert "reinforce" in rel2
-
-
-class MockJevHandler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        content_len = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(content_len).decode("utf-8"))
-
-        # Verify Jev contract
-        assert "state" in body
-        assert "questions" in body
-
-        response_decisions = {}
-        for q in body["questions"]:
-            q_id = q["id"]
-            q_type = q["type"]
-            if q_type == "noul":
-                response_decisions[q_id] = {
-                    "type": "noul",
-                    "probability": 0.98,
-                    "confidence": 0.96,
-                }
-            elif q_type == "choice":
-                opts = q.get("options", ["opt1"])
-                response_decisions[q_id] = {
-                    "type": "choice",
-                    "selected": opts[0],
-                    "probabilities": {opts[0]: 0.95},
-                    "confidence": 0.95,
-                }
-            elif q_type == "score":
-                response_decisions[q_id] = {
-                    "type": "score",
-                    "score": 4,
-                    "probabilities": {"4": 0.9},
-                    "confidence": 0.9,
-                }
-
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps({"decisions": response_decisions}).encode("utf-8"))
-
-    def log_message(self, format, *args):
-        pass  # Quiet logging in tests
-
-
-def test_mock_live_jev_api():
-    server = HTTPServer(("127.0.0.1", 0), MockJevHandler)
-    port = server.server_port
-    thread = threading.Thread(target=server.handle_request)
-    thread.daemon = True
-    thread.start()
-
-    client = JevClient(
-        api_key="test-key-123",
-        base_url=f"http://127.0.0.1:{port}/v1/decide",
-        offline_mode=False,
-    )
-
-    questions = [
-        NoulQuestion("safe_q", "Is command safe?"),
-        ChoiceQuestion("cat_q", "Category", options=["safe", "destructive"]),
-        ScoreQuestion("rel_q", "Relevance", scale=[0, 1, 2, 3, 4]),
-    ]
-
-    batch = client.evaluate("git status", questions)
-    assert batch.is_fallback is False
-    assert batch.latency_ms > 0
-    assert batch.get_noul("safe_q").probability == 0.98
-    assert batch.get_choice("cat_q").selected == "safe"
-    assert batch.get_score("rel_q").score == 4
-
-    server.server_close()
+def test_file_evidence_denies_symlink_escape(tmp_path):
+    approved = tmp_path / "approved"
+    approved.mkdir()
+    outside = tmp_path / "outside.log"
+    outside.write_text("private")
+    link = approved / "build.log"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink privilege unavailable")
+    with pytest.raises(ValueError, match="outside_approved"):
+        read_evidence_file(str(link), "inspect", [str(approved)])
