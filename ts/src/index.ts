@@ -163,7 +163,7 @@ export class JevClient {
 
   constructor(options: JevClientOptions = {}) {
     this.apiKey = options.apiKey || (typeof process !== "undefined" ? process.env?.TYPESAFE_API_KEY || process.env?.JEV_API_KEY : undefined);
-    this.baseUrl = options.baseUrl || (typeof process !== "undefined" ? process.env?.JEV_ENDPOINT_URL : undefined) || "https://api.typesafe.ai/v1/decide";
+    this.baseUrl = options.baseUrl || (typeof process !== "undefined" ? process.env?.JEV_ENDPOINT_URL : undefined) || "https://api.typesafe.ai/v1/systemone";
     this.timeoutMs = options.timeoutMs ?? 2000;
     this.offlineMode = options.offlineMode ?? (typeof process !== "undefined" ? process.env?.JEV_OFFLINE_MODE === "1" : false);
   }
@@ -172,7 +172,7 @@ export class JevClient {
     return !this.offlineMode && Boolean(this.apiKey && this.apiKey.trim());
   }
 
-  public async evaluate(state: string, questions: Question[], model = "jev-1"): Promise<DecisionBatch> {
+  public async evaluate(state: string, questions: Question[], model = "jev-latest"): Promise<DecisionBatch> {
     if (!questions.length) {
       return { state, decisions: {}, latencyMs: 0, isFallback: false };
     }
@@ -181,11 +181,47 @@ export class JevClient {
       return evaluateHeuristics(state, questions);
     }
 
-    const payload = {
-      model,
-      state,
-      questions,
-    };
+    const isSystemOne = this.baseUrl.includes("systemone") || this.baseUrl.includes("api.typesafe.ai");
+    let payload: Record<string, any>;
+
+    if (isSystemOne) {
+      const questionsMap: Record<string, any> = {};
+      for (const q of questions) {
+        if (q.type === "choice") {
+          const criteria: Record<string, string> = {};
+          for (const opt of q.options) {
+            criteria[opt] = opt;
+          }
+          questionsMap[q.id] = {
+            type: "choice",
+            instructions: q.prompt,
+            criteria,
+          };
+        } else if (q.type === "score") {
+          questionsMap[q.id] = {
+            type: "score",
+            instructions: q.prompt,
+            criteria: q.scale.map(s => ({ score: s, description: String(s) })),
+          };
+        } else {
+          questionsMap[q.id] = {
+            type: "noul",
+            instructions: q.prompt,
+          };
+        }
+      }
+      payload = {
+        model,
+        state,
+        questions: questionsMap,
+      };
+    } else {
+      payload = {
+        model,
+        state,
+        questions,
+      };
+    }
 
     const start = Date.now();
     try {
@@ -208,18 +244,22 @@ export class JevClient {
         throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
       }
 
-      const data = await resp.json();
+      const data = await resp.json() as any;
       const elapsed = Date.now() - start;
 
+      const raw = data.answers || data.decisions || {};
       const decisions: Record<string, Decision> = {};
-      for (const [id, val] of Object.entries((data as any).decisions || {})) {
+      for (const [id, val] of Object.entries(raw)) {
         const v = val as any;
+        const conf = Number(v.confidence ?? 1.0);
         if (v.type === "noul") {
-          decisions[id] = { id, probability: Number(v.probability || 0), confidence: Number(v.confidence || 1) };
+          const prob = Number(v.noul !== undefined ? v.noul : (v.probability || 0));
+          decisions[id] = { id, probability: prob, confidence: conf };
         } else if (v.type === "choice") {
-          decisions[id] = { id, selected: String(v.selected || ""), probabilities: v.probabilities || {}, confidence: Number(v.confidence || 1) };
+          const selected = String(v.choice !== undefined ? v.choice : (v.selected || ""));
+          decisions[id] = { id, selected, probabilities: v.probabilities || {}, confidence: conf };
         } else if (v.type === "score") {
-          decisions[id] = { id, score: v.score, probabilities: v.probabilities || {}, confidence: Number(v.confidence || 1) };
+          decisions[id] = { id, score: v.score, probabilities: v.probabilities || {}, confidence: conf };
         }
       }
 
