@@ -14,6 +14,17 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = json.loads((ROOT / "ts/test/fixtures/contract.json").read_text(encoding="utf-8"))
 
 
+class FixtureLedger:
+    # This corpus compares provider contracts, including exact error codes.
+    # A slow disk may legitimately produce a deadline error instead; real SQLite
+    # and deadline behavior are covered by the runtime/accounting test suites.
+    def reserve(self):
+        return object()
+
+    def settle(self, reservation, token_count=None):
+        pass
+
+
 def materialize(spec):
     response = copy.deepcopy(FIXTURE["response"])
     for patch in spec["patches"]:
@@ -40,7 +51,7 @@ def normalized_result(spec):
         return status, body
 
     client = JevClient(api_key="fixture-only-not-a-real-key", runtime=RuntimeConfig(enabled=True),
-                       transport=transport)
+                       transport=transport, budget_ledger=FixtureLedger())
     result = client.evaluate(FIXTURE["state"], FIXTURE["questions"]).to_dict()
     result.pop("latency_ms")
     result.pop("request_id")
