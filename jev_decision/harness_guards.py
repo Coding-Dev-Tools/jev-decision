@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
 from .client import DEFAULT_MODEL, JevClient
+from .evidence_file import read_evidence_bytes
 from .primitives import ChoiceQuestion, NoulQuestion, ScoreQuestion
 from .qualification import (QualificationError, SOURCE_CLASSES, canonical_sha256,
                             validate_qualification, validate_thresholds)
@@ -181,11 +182,10 @@ def _recoverable_source(raw_output: str, source_ref: Any, first_line: int) -> bo
         return False
     try:
         path = Path(source_ref["source_path"])
-        if not path.is_absolute() or not path.is_file() or path.stat().st_size > MAX_SOURCE_BYTES:
+        if not path.is_absolute():
             return False
-        with path.open("rb") as stream:
-            data = stream.read(MAX_SOURCE_BYTES + 1)
-        if len(data) > MAX_SOURCE_BYTES or hashlib.sha256(data).hexdigest() != source_ref.get("source_sha256"):
+        _, data = read_evidence_bytes(path, [path.parent], max_bytes=MAX_SOURCE_BYTES, exact_path=True)
+        if hashlib.sha256(data).hexdigest() != source_ref.get("source_sha256"):
             return False
         from .policy import sanitize_evidence
         lines = sanitize_evidence(data.decode("utf-8-sig")).splitlines(keepends=True)

@@ -45,6 +45,8 @@ def main(argv=None):
     setup.add_argument("--harness")
     setup.add_argument("--scope", choices=["user", "project"])
     setup.add_argument("--project-root")
+    setup.add_argument("--selection-mode", choices=["off", "shadow"],
+                       help="Saved evidence policy; callers may only downgrade it")
     guard = commands.add_parser("guard", help="Assess command risk; never execute or authorize")
     guard.add_argument("command")
     guard.add_argument("--cwd", default="")
@@ -105,7 +107,7 @@ def main(argv=None):
             result = run_setup(interactive=not args.non_interactive, credential_source=args.credential_source,
                 key_env=args.key_env, workspaces=args.workspace, daily_budget=args.daily_budget,
                 timezone=args.timezone, harness=args.harness, scope=args.scope,
-                project_root=args.project_root, config=config)
+                project_root=args.project_root, selection_mode=args.selection_mode, config=config)
             _print(result)
             return 0 if result.get("status") == "ok" else 2
         if args.subcommand == "mcp":
@@ -132,22 +134,27 @@ def main(argv=None):
                 project_root=args.project_root or config.project_root, config=config)
             _print(result)
             return 0 if result.get("status") == "ok" else 2
-        client = JevClient(runtime=config)
         if args.subcommand == "doctor":
-            result = local_status(client)
+            result = local_status(config=config)
             result["harness"] = args.harness
             if args.live:
+                client = JevClient(runtime=config)
                 result["live_result"] = client.evaluate(
                     {"message": "The sample log reports a failed unit test."},
                     {"failure_present": {"type": "noul", "instructions": "Does the sample message report a failed unit test?"}}).to_dict()
                 result["authenticated"] = result["live_result"]["status"] == "ok" and result["live_result"]["source"] == "provider"
                 result["authentication_status"] = "verified" if result["authenticated"] else "failed"
                 from .budget import BudgetLedger
-                result["budget"] = BudgetLedger(config).status()
+                try:
+                    result["budget"] = BudgetLedger(config).status()
+                except Exception:
+                    # Preserve the live response and configuration diagnostics.
+                    result["budget"] = {"status": "unavailable"}
                 _print(result)
                 return 0 if result["authenticated"] else 2
             _print(result)
             return 0
+        client = JevClient(runtime=config) if args.subcommand in {"guard", "verify", "decide"} else None
         if args.subcommand == "guard":
             result = guard_bash_command(args.command, cwd=args.cwd, client=client)
         elif args.subcommand == "verify":
@@ -160,6 +167,8 @@ def main(argv=None):
         elif args.subcommand == "evidence":
             from .evidence import read_evidence_file
             options = selection_options(config, args.mode)
+            if options["mode"] != "off":
+                client = JevClient(runtime=config)
             if args.workload:
                 options["expected_workload"] = _decode(_input(args.workload).encode("utf-8"))
             result = read_evidence_file(args.file, args.goal, config.workspace_roots,
@@ -169,8 +178,11 @@ def main(argv=None):
         else:
             from .policy import sanitize_evidence
             raw = sanitize_evidence(_input(args.file))
+            options = selection_options(config, args.mode)
+            if options["mode"] != "off":
+                client = JevClient(runtime=config)
             output, stats = prune_tool_output(raw, args.goal, client=client,
-                source_class=args.source_class, max_retained_lines=args.max_lines, **selection_options(config, args.mode))
+                source_class=args.source_class, max_retained_lines=args.max_lines, **options)
             if not args.json:
                 sys.stdout.write(output)
                 if args.stats:

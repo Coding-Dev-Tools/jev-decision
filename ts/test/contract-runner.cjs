@@ -20,9 +20,11 @@ function expected(spec) {
 async function runCorpus() {
   const results = {};
   for (const spec of fixture.cases) {
+    const statuses = spec.http_statuses ?? [200];
+    let calls = 0;
     const client = new JevClient({
       apiKey: "fixture-only-not-a-real-key",
-      fetchImpl: async () => new Response(materialize(spec), { status: 200, headers: { "content-type": "application/json" } }),
+      fetchImpl: async () => new Response(materialize(spec), { status: statuses[Math.min(calls++, statuses.length - 1)], headers: { "content-type": "application/json" } }),
     });
     const result = await client.evaluate(fixture.state, fixture.questions);
     // Only elapsed time and random correlation ID vary across implementations.

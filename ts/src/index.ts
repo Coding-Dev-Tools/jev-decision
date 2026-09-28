@@ -10,6 +10,7 @@ export const DEFAULT_TYPESAFE_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 export const MAX_REQUEST_BYTES = 24_576;
 export const MAX_RESPONSE_BYTES = 262_144;
 export const MAX_DEADLINE_MS = 5_000;
+const MAX_INPUT_TOKENS = 64_000;
 const PROBABILITY_TOLERANCE = 1e-3;
 const ROUNDING_EPSILON = 1e-12;
 
@@ -528,7 +529,7 @@ export class JevClient implements JevEvaluator {
           }
           if (response.status !== 200) {
             void discard(response);
-            const code = response.status === 401 || response.status === 403 ? "authentication_error" : response.status === 429 ? "rate_limited" : "provider_error";
+            const code = response.status === 401 || response.status === 403 ? "authentication_error" : response.status === 408 ? "timeout" : response.status === 429 ? "rate_limited" : "provider_error";
             throw new ClientFailure(code, [408, 429, 500, 502, 503, 504, 529].includes(response.status), retryAfterMilliseconds(response.headers.get("retry-after")));
           }
           let data: unknown;
@@ -539,6 +540,10 @@ export class JevClient implements JevEvaluator {
           // Failed earlier attempts may still have been billed; never report the final
           // response's token counts as a known total across an uncertain retry.
           const usage = attempts === 1 ? parsed.usage : { input_tokens: null, output_tokens: null };
+          if (parsed.usage.input_tokens !== null && parsed.usage.input_tokens > MAX_INPUT_TOKENS) {
+            // Keep known usage, but never expose or cache an anomalous answer.
+            return { ...unavailable(requestId, started, "invalid_response", attempts), usage };
+          }
           return { status: "ok", source: "provider", ...parsed, usage, requested_model: DEFAULT_MODEL, latency_ms: performance.now() - started, attempts, request_id: requestId, error_code: null, is_fallback: false };
         } catch (error) {
           const failure = error instanceof ClientFailure ? error : new ClientFailure("invalid_response");

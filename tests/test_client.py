@@ -302,6 +302,7 @@ def test_transient_retry_reserves_every_attempt(make_client):
     (302, "redirect_rejected", 1),
     (401, "authentication_error", 1),
     (403, "authentication_error", 1),
+    (408, "timeout", 2),
     (429, "rate_limited", 2),
     (503, "provider_error", 2),
     (529, "provider_error", 2),

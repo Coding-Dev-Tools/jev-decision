@@ -15,13 +15,15 @@ After `jev setup`, run `jev harness install --target TARGET --scope user --dry-r
 | `gemini-cli` | `~/.gemini/settings.json` | `.gemini/settings.json` | Native MCP plus env-reference fixtures; actual client/version unverified |
 | `antigravity`, `antigravity-ide` | `~/.gemini/config/mcp_config.json` | `.agents/mcp_config.json` | Shared-path ownership fixtures; CLI and IDE require separate live verification |
 | `opencode` | `$OPENCODE_CONFIG` or `~/.config/opencode/opencode.json[c]` | `opencode.json[c]` | JSONC install/restore fixtures; actual client/version unverified |
-| `command-code` | `~/.commandcode/mcp.json` | Not offered | Preserved native adapter; current package/client pair unverified |
+| `command-code` | `~/.commandcode/mcp.json` | `.mcp.json`; skill under `.commandcode/skills` | Manual skill and install/restore fixtures; installed 1.66.0 source checked; actual client invocation unverified |
 | `crush` | Configured Crush global config/data location | Not offered | Preserved native adapter; current package/client pair unverified |
 | `pi`, `hermes`, `omp`, `openclaude`, `copilot` | Respective user skill directories | Not offered | CLI skill rendering/restore fixtures; client skill discovery unverified |
 | Generic MCP | Client-defined stdio configuration | Client-defined | Official SDK 2.2 real subprocess: legacy, auto, and `2026-07-28`; UTF-8 Windows pipes tested |
 | Generic shell/tool harness | JSON CLI `jev decide` / `jev evidence` | Caller chooses directory | Actual subprocess contract tests; no particular agent client implied |
 
-Path references: [Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), [Claude Code MCP](https://code.claude.com/docs/en/mcp), [Claude Desktop local servers](https://modelcontextprotocol.io/docs/develop/connect-local-servers), [Cursor MCP](https://cursor.com/docs/mcp), [Gemini MCP](https://geminicli.com/docs/tools/mcp-server/), [Antigravity MCP](https://antigravity.google/docs/mcp), [OpenCode MCP](https://opencode.ai/docs/mcp-servers/). Paths and client behavior can change; record versions when verifying a deployment.
+Path references: [Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), [Claude Code MCP](https://code.claude.com/docs/en/mcp), [Claude Desktop local servers](https://modelcontextprotocol.io/docs/develop/connect-local-servers), [Cursor MCP](https://cursor.com/docs/mcp), [Gemini MCP](https://geminicli.com/docs/tools/mcp-server/), [Antigravity MCP](https://antigravity.google/docs/mcp), [OpenCode MCP](https://opencode.ai/docs/mcp-servers/), [Command Code MCP](https://commandcode.ai/docs/mcp#configuration--scopes). Paths and client behavior can change; record versions when verifying a deployment.
+
+The [Command Code guide](COMMAND_CODE.md) covers the explicit `/jev-advice` skill, capture before ingestion, off/shadow/qualified-select use, and recovery. Command Code and Claude Code can share a project `.mcp.json`; the installer refuses to transfer ownership of one client's managed `jev` entry to the other. Use user scope for independent configurations.
 
 Targets that lack a detected executable report that fact. Creating an entry or discovering a profile directory does not prove the client can start it. Project trust, managed policy, plugins, and settings precedence can affect discovery. The runtime never changes those policies.
 
@@ -43,7 +45,7 @@ Merge the `jev` entry into your client's supported stdio configuration, using ab
 
 Use `C:/absolute/venv/Scripts/python.exe` on Windows. Install `jev-decision[mcp]` into that exact interpreter. The adapter lazily imports the [official SDK](https://py.sdk.modelcontextprotocol.io/) and preserves `jev-mcp`, `jev mcp`, module execution, and all six tool names. It has typed input/output schemas. Core Python 3.9 imports do not require the SDK.
 
-Codex uses `[mcp_servers.jev]` in TOML; OpenCode uses `mcp.jev` with `type: "local"`, an argv `command` array and `environment`. The selected installer renders those native formats. Gemini and Claude Code expand `${NAME}` references; Cursor uses `${env:NAME}`. These entries contain variable names, never key values. OpenCode inherits its launch environment. For other clients, use an OS vault or verify how that exact client passes an environment variable. GUI launches may not inherit a terminal's environment.
+Codex uses `[mcp_servers.jev]` in TOML; OpenCode uses `mcp.jev` with `type: "local"`, an argv `command` array and `environment`. The selected installer renders those native formats. Gemini and Claude Code expand `${NAME}` references; Cursor uses `${env:NAME}`. Command Code uses `${NAME:-}` so a missing key permits off reads. These entries contain variable names, never key values. OpenCode inherits its launch environment. For other clients, use an OS vault or verify how that exact client passes an environment variable. GUI launches may not inherit a terminal's environment.
 
 ## Generic JSON CLI
 

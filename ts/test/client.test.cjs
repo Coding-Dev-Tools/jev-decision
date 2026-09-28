@@ -299,7 +299,7 @@ test("one transient retry shares the deadline and returns the final valid respon
   assert.deepEqual(result.usage, { input_tokens: null, output_tokens: null });
 });
 
-for (const [status, code, callsExpected] of [[401, "authentication_error", 1], [403, "authentication_error", 1], [400, "provider_error", 1], [429, "rate_limited", 2], [503, "provider_error", 2], [529, "provider_error", 2]]) {
+for (const [status, code, callsExpected] of [[401, "authentication_error", 1], [403, "authentication_error", 1], [400, "provider_error", 1], [408, "timeout", 2], [429, "rate_limited", 2], [503, "provider_error", 2], [529, "provider_error", 2]]) {
   test(`HTTP ${status} produces sanitized ${code} with bounded retries`, async () => {
     let calls = 0;
     const client = new JevClient({ apiKey: "test-credential", fetchImpl: async () => { calls++; return new Response("private-provider-body-test-credential", { status }); } });
@@ -310,6 +310,20 @@ for (const [status, code, callsExpected] of [[401, "authentication_error", 1], [
     assert(!JSON.stringify(result).includes("test-credential"));
   });
 }
+
+test("input usage overruns retain known usage without exposing or caching answers", async () => {
+  const response = answer();
+  response.usage.input_tokens = 70_000;
+  let calls = 0;
+  const client = new JevClient({ apiKey: "test-credential", fetchImpl: async () => { calls++; return jsonResponse(response); } });
+  for (let i = 0; i < 2; i++) {
+    const result = await client.evaluate("state", questions());
+    assertUnavailable(result, "invalid_response");
+    assert.deepEqual(result.usage, response.usage);
+    assert.equal(result.attempts, 1);
+  }
+  assert.equal(calls, 2);
+});
 
 test("transport exceptions never expose their message and retry at most once", async () => {
   let calls = 0;

@@ -518,7 +518,7 @@ class JevClient:
             if self.model != self._runtime.model:
                 raise ValueError("model_must_match_runtime")
             try:
-                if not self.offline_mode:
+                if not self.offline_mode and self._runtime.enabled:
                     self._api_key = api_key if api_key is not None else load_api_key(self._runtime)
             except CredentialError:
                 self._configuration_error = "credential_unavailable"

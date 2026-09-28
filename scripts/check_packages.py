@@ -9,6 +9,21 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+CORE_SMOKE = '''import json, sys
+from pathlib import Path
+from jev_decision.harnesses import run_harness_command
+from jev_decision.runtime import RuntimeConfig
+root = Path(sys.argv[1])
+root.mkdir()
+config = RuntimeConfig(home=root / 'state', daily_budget_usd=0, credential_source='env')
+options = dict(target='command-code', scope='project', project_root=root, config=config)
+assert run_harness_command('install', apply=True, **options)['status'] == 'ok'
+text = (root / '.commandcode/skills/jev-advice/SKILL.md').read_text(encoding='utf-8')
+assert 'disable-model-invocation: true' in text and '{{' not in text
+assert run_harness_command('restore', apply=True, **options)['status'] == 'ok'
+assert not (root / '.mcp.json').exists()
+print(json.dumps({'packaged_skill':'command-code','provider_calls':0}))
+'''
 SMOKE = '''import asyncio, json, sys
 from mcp import Client
 from mcp.client.stdio import StdioServerParameters
@@ -45,6 +60,7 @@ def main():
     with zipfile.ZipFile(wheel) as archive:
         assert any(name.endswith("/LICENSE") for name in archive.namelist())
         assert "jev_decision/resources/jev-skill.md" in archive.namelist()
+        assert "jev_decision/resources/command-code-skill.md" in archive.namelist()
     with tarfile.open(source) as archive:
         assert any(name.endswith("/LICENSE") for name in archive.getnames())
         assert any(name.endswith("/examples/capture.py") for name in archive.getnames())
@@ -55,6 +71,9 @@ def main():
         run([python, "-m", "pip", "install", "--no-cache-dir", artifact])
         run([python, "-I", "-c", "import sys, jev_decision, jev_decision.cli; assert jev_decision.__version__ == '0.3.0'; assert 'mcp' not in sys.modules"])
         run([python, "-I", "-m", "jev_decision.cli", "doctor", "--json"])
+        core_script = outside / (label + "_core.py")
+        core_script.write_text(CORE_SMOKE, encoding="utf-8")
+        run([python, "-I", core_script, outside / (label + "-command-code")])
         run([python, "-m", "pip", "install", str(artifact) + "[mcp]"])
         script = outside / (label + "_mcp.py")
         script.write_text(SMOKE, encoding="utf-8")
@@ -62,6 +81,7 @@ def main():
     (output / "verification.json").write_text(json.dumps({"version": "0.3.0", "platform": sys.platform,
         "python": sys.version.split()[0], "wheel": wheel.name, "source": source.name,
         "clean_installs": ["wheel", "sdist"], "protocols": ["legacy", "2026-07-28"],
+        "packaged_skills": ["jev-skill.md", "command-code-skill.md"],
         "provider_calls": 0, "published": False}, indent=2) + "\n", encoding="utf-8")
 
 

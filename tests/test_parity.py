@@ -30,8 +30,17 @@ def materialize(spec):
 
 def normalized_result(spec):
     body = materialize(spec)
+    statuses = spec.get("http_statuses", [200])
+    calls = 0
+
+    def transport(*args):
+        nonlocal calls
+        status = statuses[min(calls, len(statuses) - 1)]
+        calls += 1
+        return status, body
+
     client = JevClient(api_key="fixture-only-not-a-real-key", runtime=RuntimeConfig(enabled=True),
-                       transport=lambda *args: (200, body))
+                       transport=transport)
     result = client.evaluate(FIXTURE["state"], FIXTURE["questions"]).to_dict()
     result.pop("latency_ms")
     result.pop("request_id")

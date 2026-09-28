@@ -17,6 +17,7 @@ SOURCE_CLASSES = frozenset({"test_log", "build_log", "application_log", "jsonl",
 MIN_HELD_OUT_TASKS = 30
 MAX_PROFILE_BYTES = 64 * 1024
 MAX_REPORT_BYTES = 8 * 1024 * 1024
+RETENTION_METHOD = "source_spans_v1"
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
 
 
@@ -79,6 +80,8 @@ def summarize_report(report: Dict[str, Any], source_classes: Iterable[str]) -> D
         raise QualificationError("live_evaluation_required")
     if provenance.get("label_method") not in ("human", "deterministic") or provenance.get("split_by") != "task":
         raise QualificationError("independent_task_labels_required")
+    if provenance.get("retention_method") != RETENTION_METHOD:
+        raise QualificationError("source_bound_retention_required")
     if (not _number(provenance.get("campaign_budget_usd"), positive=True)
             or not _number(provenance.get("campaign_cost_usd"))
             or provenance["campaign_cost_usd"] > provenance["campaign_budget_usd"]):

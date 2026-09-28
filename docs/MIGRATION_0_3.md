@@ -23,6 +23,10 @@ Use `harness install/restore --target NAME --scope user|project`; project scope 
 
 Evidence now has three explicit modes. `off` performs no semantic requests, `shadow` retains all evidence while scoring eligible records, and `select` requires a qualified local profile plus `expected_workload` in Python, `workload` in MCP, or `--workload FILE` in the CLI. `allow_prune=True` remains a compatibility spelling for selection and cannot bypass qualification. The old small-pilot result is not sufficient.
 
+The saved mode is a ceiling for MCP/CLI calls. An explicit per-call mode may only downgrade it. Use `jev setup --non-interactive --selection-mode shadow` after initial setup to allow measurement, or `--selection-mode off` to disable it; restart existing server processes. A saved profile path alone never enables selection. Local status, discovery and off evidence reads do not acquire/decrypt credentials; live diagnostics and inference are separate.
+
+Evaluation reports now require source-bound retention grading (`source_spans_v1`). Regenerate earlier reports and qualification profiles from the original sources and observations; rendered omission markers and redaction placeholders cannot satisfy critical-fact labels. A mode-only setup update preserves disabled state and skips unrelated credential and harness setup.
+
 File reads return page metadata and a `source_ref`. Pass `expected_source_sha256` with later range reads; changed sources fail. Redaction retains original line identities. Public raw-text pruning can measure but cannot omit content without a recoverable source. The old `MCPServer.handle_request` implementation is removed; embedders should use `create_sdk_server()` or the existing stdio entry points. The SDK owns wire-level compatibility.
 
 See [integration recipes](INTEGRATIONS.md), [evidence capture](EVIDENCE.md), and [evaluation](EVALUATION.md) before enabling a profile. These changes prepare v0.3 artifacts; preparation is not publication.

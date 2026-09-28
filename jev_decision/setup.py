@@ -15,6 +15,7 @@ def run_setup(*, interactive: bool = True, credential_source: Optional[str] = No
               key_env: Optional[str] = None, workspaces: Optional[Sequence[str]] = None,
               daily_budget: Any = None, timezone: Optional[str] = None,
               harness: Optional[str] = None, scope: Optional[str] = None, project_root: Any = None,
+              selection_mode: Optional[str] = None,
               config: Optional[RuntimeConfig] = None,
               input_fn: Optional[Callable[[str], str]] = None) -> Dict[str, Any]:
     """Configure one runtime and preview one target; installation is separate.
@@ -26,6 +27,20 @@ def run_setup(*, interactive: bool = True, credential_source: Optional[str] = No
     if type(interactive) is not bool:
         raise RuntimeConfigError("Interactive setup must be a boolean")
     previous = config or RuntimeConfig.load()
+    if selection_mode is not None and (not isinstance(selection_mode, str) or selection_mode not in {"off", "shadow"}):
+        raise RuntimeConfigError("Setup selection mode must be off or shadow; select requires a reviewed profile")
+    if not interactive and selection_mode is not None and all(value is None for value in (
+            credential_source, key_env, workspaces, daily_budget, timezone, harness, scope, project_root)):
+        # An operator must be able to disable scoring even with a stale project
+        # or unavailable vault. A policy-only change never enables the runtime.
+        updated = replace(previous, selection_mode=selection_mode)
+        updated.save()
+        return {"status": "ok", "configured": updated.setup_complete,
+                "setup_complete": updated.setup_complete, "selection_policy_updated": True,
+                "runtime": updated.public_status(), "credential_saved": False,
+                "provider_authenticated": False, "actual_client_verified": False,
+                "provider_calls": 0, "harness_installed": False,
+                "next_step": "Restart existing Jev processes to use the saved evidence policy."}
     scope = previous.harness_scope if scope is None else scope
     ask = input_fn or input
 
@@ -89,6 +104,7 @@ def run_setup(*, interactive: bool = True, credential_source: Optional[str] = No
     updated = replace(previous, credential_source=credential_source, key_env=key_env,
                       daily_budget_usd=daily_budget, timezone=timezone,
                       workspace_roots=tuple(workspaces), enabled=True, setup_complete=True,
+                      selection_mode=previous.selection_mode if selection_mode is None else selection_mode,
                       harness_target=harness, harness_scope=scope,
                       project_root=Path(project_root) if project_root is not None else None)
     # Validate every public input and selected configuration before key entry or

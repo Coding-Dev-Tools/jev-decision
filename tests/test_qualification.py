@@ -6,7 +6,7 @@ import json
 import pytest
 
 from jev_decision.harness_guards import PROMPT_RUBRIC_SHA256
-from jev_decision.qualification import (QualificationError, canonical_sha256, load_qualification,
+from jev_decision.qualification import (RETENTION_METHOD, QualificationError, canonical_sha256, load_qualification,
                                       summarize_report, validate_qualification)
 
 WORKLOAD = {"harness": "fixture", "harness_version": "1", "primary_model": "fixture", "primary_provider": "fixture"}
@@ -18,6 +18,7 @@ def qualified_documents(source_class="application_log"):
         "threshold_score": 0.25, "threshold_confidence": 0.9,
         "provenance": {"run_mode": "live", "dataset_sha256": "a" * 64, "labels_sha256": "b" * 64,
             "price_snapshot_sha256": "c" * 64, "label_method": "deterministic", "split_by": "task",
+            "retention_method": RETENTION_METHOD,
             "harness": "fixture", "harness_version": "1", "primary_model": "fixture", "primary_provider": "fixture",
             "campaign_budget_usd": 10.0, "campaign_cost_usd": 3.0, "counterbalanced": True},
         "rows": [{"task_id": str(i), "group_id": "independent-" + str(i), "split": "held_out",
@@ -123,6 +124,18 @@ def test_summary_is_not_an_attestation():
     profile, report = qualified_documents()
     profile["qualification"]["net_tokens_saved"] = 999999
     with pytest.raises(QualificationError, match="summary"):
+        validate(profile, report)
+
+
+@pytest.mark.parametrize("method", [None, "substring", "source_spans_v0"])
+def test_old_retention_grader_cannot_qualify_even_with_rebound_hash(method):
+    profile, report = qualified_documents()
+    if method is None:
+        del report["provenance"]["retention_method"]
+    else:
+        report["provenance"]["retention_method"] = method
+    profile["qualification"]["report_sha256"] = canonical_sha256(report)
+    with pytest.raises(QualificationError, match="source_bound_retention_required"):
         validate(profile, report)
 
 

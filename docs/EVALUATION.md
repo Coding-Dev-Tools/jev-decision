@@ -17,7 +17,7 @@ python scripts/evaluate_evidence.py --dataset examples/evaluation/dataset.json -
 | `shadow` | Jev scoring plus the full original page |
 | `select` | The measured candidate selection, including omission markers and metadata |
 
-The included deterministic control collapses only identical unprotected repeated records. It is an experiment control, not an automatic production transformation. `scripts/evaluate_evidence.py:local_repetitions` and the private `_select_from_shadow` helper provide reproducible candidate construction. The latter validates the original file/range and the exact shadow assessment before applying thresholds; it is absent from public MCP and CLI dispatch.
+The included deterministic control collapses only identical unprotected repeated records. It is an experiment control, not an automatic production transformation. `jev_decision.evaluation.local_repetitions` and the private `_select_from_shadow` helper provide reproducible candidate construction. The latter validates the original file/range and the exact shadow assessment before applying thresholds; it is absent from public MCP and CLI dispatch.
 
 The vendor's [passage-classification cookbook](https://docs.typesafe.ai/cookbooks/classifying_rag_passages) also separates atomic questions from deterministic routing and calls for corpus-specific thresholds. Its illustrative thresholds are not qualification evidence for your logs, model, or harness. Neither a relevance score nor an injection classifier replaces permissions or verification.
 
@@ -36,7 +36,9 @@ Keep original artifacts and detailed traces user-owned. Public reports contain h
 
 ## Input contract and collector
 
-A dataset uses `examples/evaluation/dataset.json` as its shape. Each case supplies `task_id`, `group_id`, `split`, `source_class`, relative source path and SHA-256, goal, independently labeled `critical_facts`, and `expected_answer`. Sources must remain beneath the dataset directory and match their original hashes.
+A dataset uses `examples/evaluation/dataset.json` as its shape. Each case supplies `task_id`, `group_id`, `split`, `source_class`, relative source path and SHA-256, goal, independently labeled `critical_facts`, and `expected_answer`. Sources must remain beneath the dataset directory and match their original hashes. Critical facts must be distinct, nonempty source substrings; use descriptive facts that identify the evidence needed for the task. Load manifests with `load_dataset` before `assemble_report`; copied or modified dictionaries are not verified datasets, and sources are rechecked during collection.
+
+The collector reconstructs each exact sanitized source page and its rendered response. All four arms must use the same line range, text hash and page limits. It counts critical facts only within contiguous retained original intervals: omission markers, redaction placeholders and text formed across omitted gaps earn no retention credit. Changed redacted lines are conservatively excluded. Reports include content-free retained ranges and `provenance.retention_method: "source_spans_v1"`. Reports and profiles made with the earlier rendered-substring grader must be regenerated from the original sources and observations; they cannot qualify by retaining old counts.
 
 Observations are a JSON array with exactly one entry per `(task_id, arm)`:
 
@@ -57,7 +59,7 @@ Observations are a JSON array with exactly one entry per `(task_id, arm)`:
 }
 ```
 
-This is an intentionally incomplete illustration; copy the actual tool response, including its full stats. The collector checks semantic-arm mode, requested/resolved Jev model, rubric, source class, thresholds, status, usage, source and response hashes. Baseline/local must make zero Jev calls. Responses from old rubrics, offline calls, unmatched trials or cache conditions cannot be stamped current. Task success is computed against independent expected answers, not a reported success flag.
+This is an intentionally incomplete illustration; copy the actual tool response, including its `source_ref`, `page` and full stats. The collector checks semantic-arm mode, requested/resolved Jev model, rubric, source class, thresholds, status, usage, source and response hashes. Baseline/local must make zero Jev calls. Responses from old rubrics, offline calls, unmatched trials, pages or cache conditions cannot be stamped current. Task success is computed against independent expected answers, not a reported success flag.
 
 Canonical hashes use UTF-8 JSON, sorted keys, separators `(',', ':')`, `ensure_ascii=False`, and no NaN. `jev_decision.qualification.canonical_sha256` implements that convention.
 

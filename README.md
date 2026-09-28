@@ -41,6 +41,8 @@ The [Windows versioned installer](scripts/install-runtime.ps1) remains available
 
 The [support matrix and recipes](docs/INTEGRATIONS.md) cover Codex, Claude Code/Desktop, Cursor, Gemini CLI, Antigravity, OpenCode, existing skill clients, and generic MCP/CLI clients. Configuration tests and protocol tests are separate from live client verification. No new live client/version support claim is made by this release's offline suite.
 
+Command Code users can follow the [dedicated guide](docs/COMMAND_CODE.md) for the optional `/jev-advice` skill, project configuration, and capture-before-reading workflow.
+
 Install or restore only the selected target. Project scopes are supported where the client has a documented project configuration:
 
 ```sh
@@ -83,7 +85,9 @@ Capture output to original artifacts first, then return references to the agent.
 | `shadow` | Score eligible spans; retain all evidence and measure overhead |
 | `select` | Omit only with a locally configured qualified profile and matching workload identity |
 
-`jev evidence --file /absolute/project/run/stdout.log --goal 'Find the failure cause' --mode shadow --json` reads an approved source. Recover another page with `--start-line`, `--max-lines`, and `--expected-source-sha256`. Originals stay user-owned. Changed hashes reject recovery, and redaction preserves original line numbers.
+The saved runtime mode is a ceiling: CLI/MCP callers can request a less active mode, but cannot turn an `off` runtime into `shadow` or `select`. After initial setup, opt into measurement with `jev setup --non-interactive --selection-mode shadow` and restart existing Jev server processes. Setup itself makes no provider call. Use `--selection-mode off` to disable scoring again; a retained profile cannot override that choice. A mode-only update preserves the runtime's enabled state and other settings, even if its saved project or credential backend is unavailable.
+
+`jev evidence --file /absolute/project/run/stdout.log --goal 'Find the failure cause' --mode shadow --json` then reads an approved source in measurement mode. Recover another page with `--start-line`, `--max-lines`, and `--expected-source-sha256`. Originals stay user-owned. Changed hashes reject recovery, and redaction preserves original line numbers.
 
 Small inputs, fully protected output, unknown formats, and unavailable providers retain evidence. Supported records are grouped before scoring; tracebacks, test summaries, diff hunks, warnings, statuses, and adjacent context remain protected. Initial limits are 16 questions / about 16 KiB per batch, two concurrent requests, and five seconds for the selection operation. Unprocessed spans remain available. These are engineering bounds, not demonstrated optimal settings.
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 import functools
 import json
 import sys
+import threading
 from typing import Any, Dict, Optional
 
 from .client import JevClient, _decode, normalize_questions, validate_state
@@ -22,11 +23,11 @@ class InvalidParams(ValueError):
     pass
 
 
-def local_status(client: Optional[JevClient] = None) -> Dict[str, Any]:
+def local_status(client: Optional[JevClient] = None, *, config=None) -> Dict[str, Any]:
     from .budget import BudgetLedger
     from .credentials import credential_status
     from .runtime import RuntimeConfig
-    config = getattr(client, "runtime", None) or RuntimeConfig.load()
+    config = config or getattr(client, "runtime", None) or RuntimeConfig.load()
     status = config.public_status()
     presence = credential_status(config)
     status.update(version=SERVER_VERSION, credential_present=presence["credential_present"], credential=presence, authenticated=False,
@@ -39,8 +40,16 @@ def local_status(client: Optional[JevClient] = None) -> Dict[str, Any]:
 
 
 def selection_options(config, mode=None):
-    """Only local configured profiles may qualify public evidence selection."""
-    options = {"mode": mode or getattr(config, "selection_mode", "off")}
+    """Caller choices can only reduce the operator's saved selection permission."""
+    ranks = {"off": 0, "shadow": 1, "select": 2}
+    configured = getattr(config, "selection_mode", "off")
+    requested = configured if mode is None else mode
+    if not isinstance(configured, str) or configured not in ranks:
+        raise ValueError("invalid_configured_selection_mode")
+    if not isinstance(requested, str) or requested not in ranks:
+        raise ValueError("invalid_selection_mode")
+    effective = requested if ranks[requested] <= ranks[configured] else configured
+    options = {"mode": effective}
     path = getattr(config, "qualified_profile_path", None)
     if options["mode"] == "select" and path:
         from .qualification import load_qualification
@@ -85,7 +94,19 @@ def parse_questions(raw: Any) -> Any:
 class MCPServer:
     """Application dispatcher. The SDK owns negotiation, framing and protocol errors."""
     def __init__(self, client: Optional[JevClient] = None):
-        self.client = client or JevClient()
+        from .runtime import RuntimeConfig
+        self._client = client
+        self._client_lock = threading.Lock()
+        self.runtime = getattr(client, "runtime", None) or RuntimeConfig.load()
+
+    @property
+    def client(self):
+        # Discovery, presence-only diagnostics and off reads must not unlock a vault.
+        if self._client is None:
+            with self._client_lock:
+                if self._client is None:
+                    self._client = JevClient(runtime=self.runtime)
+        return self._client
 
     def call_tool(self, name, args):
         names = {tool["name"] for tool in TOOLS_MANIFEST}
@@ -93,7 +114,7 @@ class MCPServer:
             raise InvalidParams("invalid_tool")
         try:
             if name == "jev_status":
-                return local_status(self.client)
+                return local_status(config=self.runtime)
             if name == "jev_guard_command":
                 return guard_bash_command(args["command"], cwd=args.get("cwd", ""), client=self.client)
             if name == "jev_verify_completion":
@@ -103,9 +124,9 @@ class MCPServer:
                 questions = parse_questions(args["questions"])
                 normalize_questions(questions)
                 return self.client.evaluate(args["state"], questions).to_dict()
-            from .runtime import RuntimeConfig
-            config = getattr(self.client, "runtime", None) or RuntimeConfig.load()
+            config = self.runtime
             options = selection_options(config, args.get("mode"))
+            evidence_client = self._client if options["mode"] == "off" else self.client
             options.update(max_retained_lines=args.get("max_retained_lines", 100))
             if "workload" in args:
                 options["expected_workload"] = args["workload"]
@@ -115,10 +136,10 @@ class MCPServer:
                     if key in args:
                         options[key] = args[key]
                 return read_evidence_file(args["path"], args["goal"], config.workspace_roots,
-                                          client=self.client, **options)
+                                          client=evidence_client, **options)
             from .policy import sanitize_evidence
             output, stats = prune_tool_output(sanitize_evidence(args["raw_output"]), args["current_goal"],
-                                             source_class=args.get("source_class", "auto"), client=self.client, **options)
+                                             source_class=args.get("source_class", "auto"), client=evidence_client, **options)
             return {"pruned_output": output, "stats": stats}
         except (KeyError, TypeError, ValueError):
             raise InvalidParams("invalid_tool_arguments") from None

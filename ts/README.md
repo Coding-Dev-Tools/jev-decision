@@ -7,6 +7,18 @@ For Codex/ChatGPT, Command Code, Antigravity, and other installed harnesses, use
 the repository's **Python MCP/CLI runtime** instead. Do not install this client as
 a second harness runtime or describe its calls as covered by that runtime's cap.
 
+From a reviewed checkout, prepare the local package with Node 20+:
+
+```sh
+cd ts
+npm ci
+npm run build
+npm pack
+```
+
+In your consuming project, run `npm install /absolute/path/to/coding-dev-tools-jev-decision-0.3.0.tgz`.
+This installs the prepared archive without depending on a registry release. Packing does not publish it.
+
 ```typescript
 import { JevClient } from "@coding-dev-tools/jev-decision";
 

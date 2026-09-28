@@ -10,14 +10,183 @@ import hashlib
 import json
 import math
 import random
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-from .harness_guards import PROMPT_RUBRIC_SHA256
-from .qualification import canonical_sha256, summarize_report
+from .evidence_file import read_evidence_bytes
+from .harness_guards import MAX_SOURCE_BYTES, PROMPT_RUBRIC_SHA256, _spans
+from .policy import sanitize_evidence
+from .qualification import RETENTION_METHOD, canonical_sha256, summarize_report
 from .runtime import DEFAULT_MODEL
 
 ARMS = ("baseline", "local", "shadow", "select")
+
+
+class _VerifiedDataset(dict):
+    """A JSON-compatible manifest with local source bindings kept out of reports."""
+
+    def __init__(self, manifest, directory, sources):
+        super().__init__(manifest)
+        self._directory = directory
+        self._source_paths = sources
+        self._manifest_sha256 = canonical_sha256(manifest)
+
+
+@dataclass(frozen=True, repr=False)
+class _SourceSnapshot:
+    source_sha256: str
+    raw_lines: tuple[str, ...]
+    safe_lines: tuple[str, ...]
+
+
+def _source_snapshot(path, directory, expected_hash, *, exact_path=False):
+    resolved, data = read_evidence_bytes(path, [directory], max_bytes=MAX_SOURCE_BYTES, exact_path=exact_path)
+    if hashlib.sha256(data).hexdigest() != expected_hash:
+        raise ValueError("source_hash_mismatch")
+    if b"\x00" in data:
+        raise ValueError("binary_evaluation_source")
+    raw = data.decode("utf-8-sig")
+    safe = sanitize_evidence(raw)
+    raw_lines, safe_lines = tuple(raw.splitlines(keepends=True)), tuple(safe.splitlines(keepends=True))
+    if len(raw_lines) != len(safe_lines):
+        raise ValueError("redaction_line_mapping_mismatch")
+    return resolved, _SourceSnapshot(expected_hash, raw_lines, safe_lines)
+
+
+def _verified_sources(dataset):
+    if not isinstance(dataset, _VerifiedDataset):
+        raise ValueError("load_dataset_required")
+    if canonical_sha256(dataset) != dataset._manifest_sha256:
+        raise ValueError("dataset_changed_since_loading")
+    # Check freshness again at collection time, using the exact paths that were
+    # verified during loading. No model-provided response path is ever opened.
+    return {case["task_id"]: _source_snapshot(dataset._source_paths[case["task_id"]], dataset._directory,
+                case["source_sha256"], exact_path=True)[1] for case in dataset["cases"]}
+
+
+def _append_interval(intervals, start, end):
+    if end < start:
+        return
+    if intervals and intervals[-1][1] + 1 == start:
+        intervals[-1] = (intervals[-1][0], end)
+    else:
+        intervals.append((start, end))
+
+
+def _local_repetition_selection(text, source_class, first_line=1):
+    """Reproduce the deterministic control and its retained original intervals."""
+    result, intervals = [], []
+    for span in _spans(text.splitlines(keepends=True), source_class, first_line):
+        content = span["_text"]
+        parts = content.splitlines(keepends=True)
+        retained_end = span["end_line"]
+        if not span["protected"] and len(parts) > 2 and len(set(parts)) == 1:
+            replacement = parts[0] + "[Repeated identical source lines %d-%d; original retained]\n" % (span["start_line"] + 1, span["end_line"])
+            if len(replacement) < len(content):
+                content, retained_end = replacement, span["start_line"]
+        result.append(content)
+        _append_interval(intervals, span["start_line"], retained_end)
+    return "".join(result), intervals
+
+
+def local_repetitions(text, source_class, first_line=1):
+    """Build the reproducible local control; marker text is never source evidence."""
+    return _local_repetition_selection(text, source_class, first_line)[0]
+
+
+def _retained_intervals(source, response, arm, source_class):
+    """Validate exact response rendering and return only retained source ranges.
+
+    The omission syntax is reconstructed from spans, never stripped with a regex:
+    a source record that happens to resemble a marker stays ordinary evidence.
+    """
+    if not isinstance(response, dict) or response.get("status") != "ok":
+        return None
+    reference, page, stats = (response.get(key) for key in ("source_ref", "page", "stats"))
+    if not all(isinstance(value, dict) for value in (reference, page, stats)):
+        return None
+    start, end = reference.get("start_line"), reference.get("end_line")
+    if (type(start) is not int or type(end) is not int
+            or not 1 <= start <= len(source.safe_lines) + 1 or not start - 1 <= end <= len(source.safe_lines)):
+        return None
+    max_lines, max_bytes = page.get("max_lines"), page.get("max_bytes")
+    if type(max_lines) is not int or not 1 <= max_lines <= 10000 or type(max_bytes) is not int or not 1 <= max_bytes <= 128 * 1024:
+        return None
+    expected_end, page_bytes = start - 1, 0
+    for line in source.safe_lines[start - 1:start - 1 + max_lines]:
+        size = len(line.encode("utf-8"))
+        if page_bytes + size > max_bytes:
+            break
+        page_bytes += size
+        expected_end += 1
+    if end != expected_end:
+        return None
+    lines = source.safe_lines[start - 1:end]
+    text = "".join(lines)
+    text_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    more = end < len(source.safe_lines)
+    if (reference.get("source_sha256") != source.source_sha256
+            or reference.get("text_sha256") != text_hash
+            or not isinstance(reference.get("source_path"), str) or not reference["source_path"]
+            or response.get("source_path") != reference["source_path"]
+            or response.get("source_sha256") != source.source_sha256
+            or response.get("source_class") != source_class
+            or page.get("start_line") != start or page.get("end_line") != end
+            or page.get("total_lines") != len(source.safe_lines) or page.get("has_more") is not more
+            or page.get("next_line") != (end + 1 if more else None)
+            or stats.get("input_sha256") != text_hash or stats.get("source_start_line") != start
+            or stats.get("original_lines") != len(lines)
+            or stats.get("original_bytes") != len(text.encode("utf-8"))):
+        return None
+    if arm == "local" and stats.get("control") == "exact_unprotected_repetition":
+        expected, intervals = _local_repetition_selection(text, source_class, start)
+        return intervals if response.get("output") == expected else None
+    if arm in {"baseline", "local"}:
+        if response.get("output") != text:
+            return None
+        return [(start, end)] if end >= start else []
+    spans = stats.get("spans")
+    expected_spans = _spans(list(lines), source_class, start)
+    if not isinstance(spans, list) or len(spans) != len(expected_spans) or (lines and not spans):
+        return None
+    rendered, intervals = [], []
+    for span, expected in zip(spans, expected_spans):
+        if (not isinstance(span, dict) or type(span.get("retained")) is not bool
+                or any(type(span.get(key)) is not type(expected[key]) or span[key] != expected[key]
+                       for key in ("start_line", "end_line", "protected"))):
+            return None
+        if span["retained"]:
+            rendered.append(expected["_text"])
+            _append_interval(intervals, span["start_line"], span["end_line"])
+        else:
+            if (arm != "select" or span["protected"] or span.get("assessed") is not True
+                    or not _number(span.get("score")) or span["score"] > .25
+                    or not _number(span.get("confidence")) or not .9 <= span["confidence"] <= 1):
+                return None
+            rendered.append("[Jev omitted source lines %d-%d; recover from source %s]\n" %
+                            (span["start_line"], span["end_line"], source.source_sha256[:12]))
+    return intervals if response.get("output") == "".join(rendered) else None
+
+
+def _critical_retained(source, intervals, facts):
+    if intervals is None:
+        return None
+    chunks = []
+    for start, end in intervals:
+        unchanged = []
+        for index in range(start - 1, end):
+            if source.raw_lines[index] == source.safe_lines[index]:
+                unchanged.append(source.raw_lines[index])
+            else:
+                # Redaction can create text as well as remove it. Conservatively
+                # exclude changed source lines instead of crediting placeholders.
+                chunks.append("".join(unchanged))
+                unchanged = []
+        chunks.append("".join(unchanged))
+    # Separate chunks deliberately stay separate: removed lines cannot fabricate
+    # a phrase by joining the surviving text on either side of an omission.
+    return sum(any(fact in chunk for chunk in chunks) for fact in facts)
 
 
 def arm_order(index):
@@ -31,7 +200,10 @@ def _count(value):
 
 
 def _number(value):
-    return type(value) in (int, float) and math.isfinite(value) and value >= 0
+    try:
+        return type(value) in (int, float) and math.isfinite(value) and value >= 0
+    except (OverflowError, ValueError):
+        return False
 
 
 def _sum_known(values):
@@ -83,10 +255,13 @@ def load_dataset(path):
     path = Path(path).resolve()
     dataset = json.loads(path.read_text(encoding="utf-8-sig"))
     if (not isinstance(dataset, dict) or dataset.get("version") != 1 or
-            dataset.get("label_method") not in {"human", "deterministic"} or not dataset.get("cases")):
+            dataset.get("label_method") not in {"human", "deterministic"}
+            or not isinstance(dataset.get("cases"), list) or not dataset["cases"]):
         raise ValueError("invalid_dataset")
-    identities, partitions, source_groups = set(), {}, {}
+    identities, partitions, source_groups, sources = set(), {}, {}, {}
     for case in dataset["cases"]:
+        if not isinstance(case, dict):
+            raise ValueError("dataset_identity_required")
         for key in ("task_id", "group_id", "goal", "source_class", "source", "source_sha256"):
             if not isinstance(case.get(key), str) or not case[key]:
                 raise ValueError("dataset_identity_required")
@@ -97,21 +272,22 @@ def load_dataset(path):
         if group in partitions and partitions[group] != split:
             raise ValueError("source_group_leaks_across_splits")
         partitions[group] = split
-        source = (path.parent / case["source"]).resolve()
-        source.relative_to(path.parent)
-        if source.stat().st_size > 2 * 1024 * 1024:
-            raise ValueError("source_limit")
-        if hashlib.sha256(source.read_bytes()).hexdigest() != case["source_sha256"]:
-            raise ValueError("source_hash_mismatch")
+        relative = Path(case["source"])
+        if relative.is_absolute():
+            raise ValueError("relative_source_path_required")
+        resolved, snapshot = _source_snapshot(path.parent / relative, path.parent, case["source_sha256"])
+        sources[identity] = resolved
         if case["source_sha256"] in source_groups and source_groups[case["source_sha256"]] != group:
             raise ValueError("source_group_mismatch")
         source_groups[case["source_sha256"]] = group
         facts = case.get("critical_facts")
-        if not isinstance(facts, list) or not facts or not all(isinstance(fact, str) and fact for fact in facts):
+        if not isinstance(facts, list) or not facts or not all(isinstance(fact, str) and fact.strip() for fact in facts):
             raise ValueError("independent_critical_facts_required")
+        if len(set(facts)) != len(facts) or any(fact not in "".join(snapshot.raw_lines) for fact in facts):
+            raise ValueError("critical_facts_must_match_source")
         if "expected_answer" not in case:
             raise ValueError("independent_task_answer_required")
-    return dataset
+    return _VerifiedDataset(dataset, path.parent, sources)
 
 
 def assemble_report(dataset, observations, provenance, prices):
@@ -122,6 +298,7 @@ def assemble_report(dataset, observations, provenance, prices):
     """
     if not isinstance(observations, list):
         raise ValueError("invalid_observations")
+    sources = _verified_sources(dataset)
     cases = {case["task_id"]: case for case in dataset["cases"]}
     by_identity = {}
     for observation in observations:
@@ -139,8 +316,9 @@ def assemble_report(dataset, observations, provenance, prices):
         for position, arm in enumerate(arm_order(index)):
             observation = by_identity[(case["task_id"], arm)]
             response = observation.get("tool_response")
+            intervals = _retained_intervals(sources[case["task_id"]], response, arm, case["source_class"])
             route = observation.get("route", {})
-            route_ok = (observation.get("source_sha256") == case["source_sha256"] and
+            route_ok = (intervals is not None and observation.get("source_sha256") == case["source_sha256"] and
                         isinstance(response, dict) and isinstance(response.get("output"), str) and
                         observation.get("tool_response_sha256") == canonical_sha256(response) and
                         response.get("source_sha256") == case["source_sha256"] and
@@ -180,11 +358,16 @@ def assemble_report(dataset, observations, provenance, prices):
                 all(_number(prices.get(key)) for key in ("jev_input_per_million", "jev_output_per_million")) else None)
             total_cost = _sum_known([primary_cost, jev_cost])
             campaign_costs.append(total_cost)
-            output = response.get("output", "") if isinstance(response, dict) else ""
             record = {"task_id": case["task_id"], "arm": arm, "order": observation.get("order"),
                       "route_verified": route_ok, "trace_sha256": observation.get("trace_sha256"),
                       "source_sha256": case["source_sha256"],
                       "tool_response_sha256": observation.get("tool_response_sha256"),
+                      "evidence_verified": intervals is not None,
+                      "evidence_input": ({key: response["source_ref"][key] for key in ("start_line", "end_line", "text_sha256")}
+                                         | {key: response["page"][key] for key in ("max_lines", "max_bytes")}
+                                         if intervals is not None else None),
+                      "retained_source_spans": ([{"start_line": start, "end_line": end} for start, end in intervals]
+                                                 if intervals is not None else None),
                       "tool_response_bytes": len(json.dumps(response, ensure_ascii=False, separators=(",", ":")).encode("utf-8")),
                       "primary_usage": usage, "jev_usage": jev_usage,
                       "retries": observation.get("retries"), "recovery_calls": observation.get("recovery_calls"),
@@ -194,12 +377,13 @@ def assemble_report(dataset, observations, provenance, prices):
                       "modeled_primary_cost_usd": primary_cost, "modeled_jev_cost_usd": jev_cost,
                       "modeled_total_cost_usd": total_cost,
                       "critical_evidence_total": len(case["critical_facts"]),
-                      "critical_evidence_retained": sum(fact in output for fact in case["critical_facts"]),
+                      "critical_evidence_retained": _critical_retained(sources[case["task_id"]], intervals, case["critical_facts"]),
                       "success": (observation["answer"] == case["expected_answer"] if "answer" in observation else None)}
             matched[arm] = record
             arm_records.append(record)
         baseline, selected = matched["baseline"], matched["select"]
         comparable = all(record["cache_state"] == selected["cache_state"] and record["trial"] == selected["trial"]
+                         and record["evidence_input"] == selected["evidence_input"]
                          for record in matched.values())
         row = {"task_id": case["task_id"], "group_id": case["group_id"], "split": case["split"],
                "source_class": case["source_class"], "source_sha256": case["source_sha256"],
@@ -222,13 +406,14 @@ def assemble_report(dataset, observations, provenance, prices):
                "selected_latency_ms": selected["total_elapsed_ms"]}
         rows.append(row)
     classes = sorted({case["source_class"] for case in dataset["cases"]})
-    labels = [{key: case[key] for key in ("task_id", "group_id", "split", "critical_facts", "expected_answer")}
+    labels = [{key: case[key] for key in ("task_id", "group_id", "split", "source_sha256", "source_class", "critical_facts", "expected_answer")}
               for case in dataset["cases"]]
     report = {"version": 1, "kind": "jev_selection_evaluation", "model": DEFAULT_MODEL,
               "prompt_rubric_sha256": PROMPT_RUBRIC_SHA256, "threshold_score": .25,
               "threshold_confidence": .9, "source_classes": classes,
               "provenance": {**provenance, "dataset_sha256": canonical_sha256(dataset),
                   "labels_sha256": canonical_sha256(labels), "label_method": dataset["label_method"],
+                  "retention_method": RETENTION_METHOD,
                   "split_by": "task", "price_snapshot_sha256": canonical_sha256(prices),
                   "counterbalanced": complete_order, "campaign_cost_usd": _sum_known(campaign_costs)},
               "rows": rows, "arms": arm_records, "invoice_verified": False,

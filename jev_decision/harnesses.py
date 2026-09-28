@@ -29,7 +29,7 @@ _END = "# <<< jev-decision managed MCP"
 HARNESS_TARGETS = frozenset({"codex", "command-code", "antigravity", "antigravity-ide",
     "claude-code", "claude-desktop", "cursor", "opencode", "crush", "pi", "hermes",
     "omp", "openclaude", "copilot", "gemini-cli"})
-PROJECT_TARGETS = frozenset({"codex", "claude-code", "cursor", "gemini-cli",
+PROJECT_TARGETS = frozenset({"codex", "command-code", "claude-code", "cursor", "gemini-cli",
                            "antigravity", "antigravity-ide", "opencode"})
 
 
@@ -308,8 +308,8 @@ def _location(name, default, filename=None):
     return path
 
 
-def _skill(python, inactive=False, runtime_home=None):
-    template = (Path(__file__).parent / "resources" / "jev-skill.md").read_text(encoding="utf-8")
+def _skill(python, inactive=False, runtime_home=None, template_name="jev-skill.md"):
+    template = (Path(__file__).parent / "resources" / template_name).read_text(encoding="utf-8")
     command = ("& '" + python.replace("'", "''") + "'" if os.name == "nt" else shlex.quote(python))
     command += " -I -m jev_decision.cli"
     if runtime_home is not None:
@@ -346,12 +346,13 @@ def _discover(target=None, scope="user", project_root=None, runtime=None):
     artifacts, clients = {}, []
 
     def add(name, profile, commands, config=None, kind="json", parent="mcpServers", value=None,
-            skill_root=None, executable=None, inactive_if_missing=False):
+            skill_root=None, executable=None, inactive_if_missing=False, skill_template="jev-skill.md"):
         if target is not None and name != target:
             return
         if scope == "project":
             mappings = {
                 "codex": (".codex/config.toml", ".agents/skills"),
+                "command-code": (".mcp.json", ".commandcode/skills"),
                 "claude-code": (".mcp.json", ".claude/skills"),
                 "cursor": (".cursor/mcp.json", ".cursor/skills"),
                 "gemini-cli": (".gemini/settings.json", ".gemini/skills"),
@@ -377,7 +378,7 @@ def _discover(target=None, scope="user", project_root=None, runtime=None):
             entries.append(_Artifact(config, kind, value, parent, [name], detected or name == target,
                                      scope, str(project_root) if project_root else None))
         if skill_root:
-            entries.append(_Artifact(skill_root / SKILL / "SKILL.md", "skill", _skill(python, inactive, runtime.home), None,
+            entries.append(_Artifact(skill_root / SKILL / "SKILL.md", "skill", _skill(python, inactive, runtime.home, skill_template), None,
                                      [name], detected or name == target, scope,
                                      str(project_root) if project_root else None))
         for item in entries:
@@ -391,8 +392,13 @@ def _discover(target=None, scope="user", project_root=None, runtime=None):
     add("codex", codex, ["codex"], codex / "config.toml", "toml", "mcp_servers",
         _toml_block(python, runtime.key_env if runtime.credential_source == "env" else None, runtime.home), codex / "skills")
     root = home / ".commandcode"
-    add("command-code", root, ["cmdc", "commandcode"], root / "mcp.json", value=dict(stdio, transport="stdio", enabled=True),
-        skill_root=root / "skills", executable=local / "Programs" / "Command Code" / "Command Code.exe")
+    command_stdio = dict(stdio, transport="stdio", enabled=True, env=dict(stdio["env"]))
+    if runtime.credential_source == "env":
+        # Empty fallback keeps off-mode evidence reads available without a key.
+        command_stdio["env"][runtime.key_env] = "${" + runtime.key_env + ":-}"
+    add("command-code", root, ["cmdc", "commandcode"], root / "mcp.json", value=command_stdio,
+        skill_root=root / "skills", executable=local / "Programs" / "Command Code" / "Command Code.exe",
+        skill_template="command-code-skill.md")
     gemini = home / ".gemini"
     for name, folder, exe in (("antigravity", "antigravity", "Antigravity.exe"),
                               ("antigravity-ide", "Antigravity IDE", "Antigravity IDE.exe")):
@@ -650,6 +656,16 @@ def run_harness_command(action, apply=False, *, target=None, scope="user", proje
                 if record and (not isinstance(record, dict) or record.get("path") != str(artifact.path.absolute()) or
                                record.get("kind") != artifact.kind or record.get("parent") != artifact.parent):
                     raise HarnessError("invalid_ownership_record")
+                if record and artifact.scope == "project" and artifact.path.name == ".mcp.json":
+                    # Command Code and Claude Code consume this same project
+                    # entry. A selected client must not take over or restore
+                    # another client's managed entry merely because paths match.
+                    previous_clients = record.get("clients", [])
+                    if not isinstance(previous_clients, list) or any(not isinstance(name, str) for name in previous_clients):
+                        raise HarnessError("invalid_ownership_record")
+                    involved = set(previous_clients) | set(artifact.clients)
+                    if "command-code" in involved and not set(previous_clients).intersection(artifact.clients):
+                        raise HarnessError("shared_client_ownership_conflict")
                 if action == "restore":
                     status = _restore_one(artifact, record, manifest, manifest_path, directory, apply)
                 elif action == "status":

@@ -20,25 +20,12 @@ from jev_decision.evaluation import (  # noqa: E402
     arm_order,
     assemble_report,
     load_dataset,
+    local_repetitions,
     write_profile,
 )
 from jev_decision.evidence import read_evidence_file  # noqa: E402
-from jev_decision.harness_guards import _select_from_shadow, _spans  # noqa: E402
+from jev_decision.harness_guards import _select_from_shadow  # noqa: E402
 from jev_decision.qualification import canonical_sha256  # noqa: E402
-
-
-def local_repetitions(text, source_class):
-    """Experimental deterministic control: compact only identical unprotected runs."""
-    lines, result = text.splitlines(keepends=True), []
-    for span in _spans(lines, source_class, 1):
-        content = span["_text"]
-        parts = content.splitlines(keepends=True)
-        if not span["protected"] and len(parts) > 2 and len(set(parts)) == 1:
-            replacement = parts[0] + "[Repeated identical source lines %d-%d; original retained]\n" % (span["start_line"] + 1, span["end_line"])
-            result.append(replacement if len(replacement) < len(content) else content)
-        else:
-            result.append(content)
-    return "".join(result)
 
 
 def offline_observations(dataset, directory):
