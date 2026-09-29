@@ -1,4 +1,4 @@
-# Jev v0.3 release review — 2026-09-28
+# Jev v0.3 release review — 2026-09-28–29
 
 This review covered the portable candidate from PR #1, starting at `27da47d`, with four independent Astra Max reviewers and one parent integrating changes. The lanes covered client/runtime contracts, onboarding and harness installation, evidence and qualification, and distribution/MCP compatibility. No worker delegated further or created a separate chat. This is engineering release evidence; no paid provider campaign or named-client invocation was performed.
 
@@ -18,6 +18,7 @@ This review covered the portable candidate from PR #1, starting at `27da47d`, wi
 | Target isolation | Unrelated client environment overrides blocked the selected installation | Only applicable target and scope locations are validated |
 | Setup guidance | Useful configuration failures became an opaque error; keyring guidance named a nonexistent extra | Allowlisted errors provide safe corrective hints; optional storage points to `jev-decision[setup]` |
 | Contention test | A standalone ledger call without an absolute deadline correctly rejected a reservation but exceeded an unsupported one-second test limit on macOS CI | The held-lock test verifies the actual SQLite busy timeout and zero reservations; explicit accounting and complete-client deadline tests remain unchanged |
+| Credential format | Setup could save a Unicode or DEL-containing credential rejected by the HTTP client | Storage, environment loading and the client share one format check; invalid values cannot replace an existing key, and masked CLI entry returns a safe corrective hint |
 
 ## Less work for installed-package users
 
@@ -27,7 +28,7 @@ The Command Code guide and packaged skills use this entry point. Generic advice 
 
 ## Validation and release gates
 
-Local Windows verification used Python 3.12.10 and Node 24.15.0: **529 Python tests passed, one symlink-privilege test skipped; 86 TypeScript tests passed**. Shared native fixtures run against both implementations. Full configured Ruff rules and Git whitespace checks passed. Focused client and evidence fixes received independent re-review with no remaining findings.
+Local Windows verification used Python 3.12.10 and Node 24.15.0: **560 Python tests passed, one symlink-privilege test skipped; 86 TypeScript tests passed**. Shared native fixtures run against both implementations. Full configured Ruff rules and Git whitespace checks passed. Focused client, credential and evidence fixes received independent re-review with no remaining findings.
 
 The package checker builds wheel/source artifacts and installs each outside the checkout, then invokes packaged capture, Command Code skill installation/restoration, and legacy/current MCP subprocesses. The npm checker packs and installs outside the checkout. CI performs these checks on Windows, macOS and Linux and tests core Python 3.9–3.13; read the exact PR-head check results before release. Artifact creation does not publish a package or merge the PR.
 

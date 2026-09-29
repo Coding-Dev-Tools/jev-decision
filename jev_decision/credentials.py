@@ -99,12 +99,19 @@ def _restrict_acl(path: Path, *, directory: bool) -> None:
         raise CredentialError("Unable to restrict credential permissions") from None
 
 
+def _valid_key_format(value: Any) -> bool:
+    """Match the HTTP client's credential format without accessing any store."""
+    return (isinstance(value, str) and 1 <= len(value) <= 4096
+            and value.lower() not in ("mock", "offline")
+            and all(33 <= ord(character) <= 126 for character in value))
+
+
 def _validated_key(value: str) -> str:
     if not isinstance(value, str):
         raise CredentialError("API key must be nonempty text")
     value = value.strip()
-    if not value or len(value) > 4096 or any(character.isspace() or ord(character) < 32 for character in value):
-        raise CredentialError("API key must be a single nonempty token")
+    if not _valid_key_format(value):
+        raise CredentialError("API key must be a printable ASCII token of 1-4096 characters, excluding mock/offline")
     return value
 
 

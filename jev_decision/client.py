@@ -535,11 +535,8 @@ class JevClient:
                     and self._valid_key() and getattr(self._runtime, "enabled", False))
 
     def _valid_key(self) -> bool:
-        return bool(
-            isinstance(self._api_key, str) and 1 <= len(self._api_key) <= 4096
-            and self._api_key.lower() not in ("mock", "offline")
-            and all(33 <= ord(char) <= 126 for char in self._api_key)
-        )
+        from .credentials import _valid_key_format
+        return _valid_key_format(self._api_key)
 
     def _initialize_ledger(self, *, deadline: float) -> Any:
         from .budget import BudgetLedger

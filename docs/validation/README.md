@@ -1,10 +1,10 @@
 # Portable v0.3 validation
 
-The source validation on 2026-09-28 used Windows, Python 3.12.10, Node 24.15.0 and official MCP SDK 2.2.0. It made no live provider calls and changed no user harness profiles or credentials.
+The source validation on 2026-09-28–29 used Windows, Python 3.12.10, Node 24.15.0 and official MCP SDK 2.2.0. It made no live provider calls and changed no user harness profiles or credentials.
 
 | Check | Observed result |
 | --- | --- |
-| Full Python suite | 529 passed, 1 skipped (Windows symlink privilege) |
+| Full Python suite | 560 passed, 1 skipped (Windows symlink privilege) |
 | TypeScript build + Node suite | 86 passed |
 | Shared Python/TypeScript fixtures | Passed against compiled TypeScript |
 | Actual stdio subprocess | Legacy handshake, automatic discovery and 2026-07-28 passed; separate 2024-11-05 negotiation passed |
@@ -15,6 +15,7 @@ The source validation on 2026-09-28 used Windows, Python 3.12.10, Node 24.15.0 a
 | Command Code recipe | Temporary user/project install, explicit skill, shared-entry conflict protection, restore and capture-to-off-read passed; installed 1.66.0 source checked |
 | Evidence and policy review | Opened-file validation, real Windows junction races, stale roots, policy downgrade matrix and credential-free diagnostics passed |
 | Setup credential preservation | Existing keyring references survive interactive reconfiguration; fresh setup/backend changes still offer masked entry |
+| Credential format | Storage, environment loading and client validation share the same printable-ASCII contract; invalid input is rejected before vault access or replacement |
 | Qualification review | Source-span grading excludes markers/redaction/gaps, matches pages across arms, detects tampering and rejects old grading methods |
 | Release review regressions | Rounded-score feasibility, typed JSON equality, restored Choice labels and Score legends, omitted-mode off defaults, timing consistency, severity protection and isolated harness scopes passed |
 | Installed capture | CLI preserves argv, binary streams and producer exit status without runtime configuration; original checkout wrappers retained |
