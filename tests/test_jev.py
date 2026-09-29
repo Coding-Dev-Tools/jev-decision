@@ -1,8 +1,10 @@
 """Regressions for advisory authority and evidence preservation."""
-import pytest
 import json
 import threading
 import time
+
+import pytest
+from test_qualification import WORKLOAD, qualified_documents
 
 from jev_decision import DecisionBatch, JevClient, ScoreDecision
 from jev_decision.evidence import read_evidence_file
@@ -13,7 +15,6 @@ from jev_decision.harness_guards import (
     prune_tool_output,
     verify_turn_completion,
 )
-from test_qualification import WORKLOAD, qualified_documents
 
 
 class Scorer:

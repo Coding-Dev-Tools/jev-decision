@@ -6,8 +6,14 @@ import json
 import pytest
 
 from jev_decision.harness_guards import PROMPT_RUBRIC_SHA256
-from jev_decision.qualification import (RETENTION_METHOD, QualificationError, canonical_sha256, load_qualification,
-                                      summarize_report, validate_qualification)
+from jev_decision.qualification import (
+    RETENTION_METHOD,
+    QualificationError,
+    canonical_sha256,
+    load_qualification,
+    summarize_report,
+    validate_qualification,
+)
 
 WORKLOAD = {"harness": "fixture", "harness_version": "1", "primary_model": "fixture", "primary_provider": "fixture"}
 

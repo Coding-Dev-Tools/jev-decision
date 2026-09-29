@@ -2,10 +2,27 @@
 import hashlib
 
 import pytest
+from test_jev import Scorer, log_text
 
 from jev_decision.evidence import read_evidence_file
 from jev_decision.policy import sanitize_evidence
-from test_jev import Scorer, log_text
+
+
+@pytest.mark.parametrize("severity", ["WARN", "FATAL", "CRITICAL"])
+def test_severe_records_and_adjacent_context_survive_low_relevance_scores(tmp_path, severity):
+    from jev_decision.harness_guards import _select_from_shadow
+    lines = ["INFO routine progress %d\n" % index for index in range(130)]
+    lines[65] = severity + " Connection unavailable\n"
+    path = tmp_path / "severity.log"
+    path.write_bytes("".join(lines).encode("utf-8"))
+    response = read_evidence_file(str(path), "inspect", [tmp_path], client=Scorer(), mode="shadow",
+                                  source_class="application_log", max_retained_lines=20)
+    for span in response["stats"]["spans"]:
+        if not span["protected"]:
+            span.update(score=0, confidence=.99, assessed=True)
+    output, stats = _select_from_shadow(response["output"], response["stats"], source_ref=response["source_ref"])
+    assert all(line in output for line in lines[63:68])
+    assert any(span["protected"] and span["start_line"] <= 66 <= span["end_line"] for span in stats["spans"])
 
 
 def test_pages_reconstruct_file_larger_than_old_response_limit_without_calls(tmp_path):

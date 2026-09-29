@@ -150,7 +150,7 @@ def test_command_code_example_capture_then_off_read_never_ingests_raw_output_fir
                 "sys.stderr.buffer.write(" + repr(stderr_text.encode()) + "); sys.exit(7)")
     environment = {key: value for key, value in os.environ.items()
                    if key.upper() in {"SYSTEMROOT", "WINDIR", "PATH", "TEMP", "TMP", "PATHEXT"}}
-    captured = subprocess.run([sys.executable, str(repo / "examples/capture.py"), "--directory", str(destination),
+    captured = subprocess.run([sys.executable, "-m", "jev_decision.cli", "capture", "--directory", str(destination),
                                "--", sys.executable, "-c", producer], cwd=repo, env=environment,
                               capture_output=True, text=True, encoding="utf-8", timeout=15)
     assert captured.returncode == 7 and captured.stderr == ""

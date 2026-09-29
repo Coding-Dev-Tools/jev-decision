@@ -9,12 +9,21 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-CORE_SMOKE = '''import json, sys
+CORE_SMOKE = '''import json, os, subprocess, sys
 from pathlib import Path
 from jev_decision.harnesses import run_harness_command
 from jev_decision.runtime import RuntimeConfig
 root = Path(sys.argv[1])
 root.mkdir()
+captured = subprocess.run([sys.executable, '-I', '-m', 'jev_decision.cli', 'capture',
+    '--directory', str(root / 'capture'), '--', sys.executable, '-c',
+    'import sys; print("capture fixture"); print("warning", file=sys.stderr); sys.exit(7)'],
+    capture_output=True, env={**os.environ, 'JEV_HOME':'invalid-relative-home'}, timeout=15)
+assert captured.returncode == 7 and captured.stderr == b''
+reference = json.loads(captured.stdout)
+assert reference['producer_exit_status'] == 7 and b'fixture' not in captured.stdout
+manifest = json.loads(Path(reference['capture']).read_bytes())
+assert manifest['streams']['stdout']['bytes'] > 0 and manifest['streams']['stderr']['bytes'] > 0
 config = RuntimeConfig(home=root / 'state', daily_budget_usd=0, credential_source='env')
 options = dict(target='command-code', scope='project', project_root=root, config=config)
 assert run_harness_command('install', apply=True, **options)['status'] == 'ok'
@@ -22,7 +31,7 @@ text = (root / '.commandcode/skills/jev-advice/SKILL.md').read_text(encoding='ut
 assert 'disable-model-invocation: true' in text and '{{' not in text
 assert run_harness_command('restore', apply=True, **options)['status'] == 'ok'
 assert not (root / '.mcp.json').exists()
-print(json.dumps({'packaged_skill':'command-code','provider_calls':0}))
+print(json.dumps({'packaged_skill':'command-code','capture_exit_status':7,'provider_calls':0}))
 '''
 SMOKE = '''import asyncio, json, sys
 from mcp import Client
@@ -82,6 +91,7 @@ def main():
         "python": sys.version.split()[0], "wheel": wheel.name, "source": source.name,
         "clean_installs": ["wheel", "sdist"], "protocols": ["legacy", "2026-07-28"],
         "packaged_skills": ["jev-skill.md", "command-code-skill.md"],
+        "packaged_capture": True,
         "provider_calls": 0, "published": False}, indent=2) + "\n", encoding="utf-8")
 
 

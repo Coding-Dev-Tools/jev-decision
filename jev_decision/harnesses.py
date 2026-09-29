@@ -337,9 +337,18 @@ def _discover(target=None, scope="user", project_root=None, runtime=None):
         raise HarnessError("project_root_requires_project_scope")
     runtime = runtime or RuntimeConfig.load()
     home = Path.home()
-    local = _location("LOCALAPPDATA", home / "AppData" / "Local")
-    xdg = _location("XDG_CONFIG_HOME", home / ".config")
-    codex = _location("CODEX_HOME", home / ".codex")
+
+    def selected_location(name, default, targets, filename=None):
+        # Unselected clients and user-config overrides in project scope must
+        # not block an explicitly targeted installation or restoration.
+        if scope == "user" and (target is None or target in targets):
+            return _location(name, default, filename)
+        return default
+
+    local = selected_location("LOCALAPPDATA", home / "AppData" / "Local",
+                              {"command-code", "antigravity", "antigravity-ide", "claude-desktop", "cursor", "crush"})
+    xdg = selected_location("XDG_CONFIG_HOME", home / ".config", {"opencode", "crush"})
+    codex = selected_location("CODEX_HOME", home / ".codex", {"codex"})
     python = str(Path(sys.executable).resolve())
     stdio = {"command": python, "args": ["-I", "-m", "jev_decision.mcp"],
              "env": {"JEV_HOME": str(runtime.home)}}
@@ -410,7 +419,7 @@ def _discover(target=None, scope="user", project_root=None, runtime=None):
     add("claude-code", home / ".claude", ["claude"], home / ".claude.json", value=claude_stdio,
         skill_root=home / ".claude" / "skills")
     if sys.platform == "win32":
-        desktop = _location("APPDATA", home / "AppData" / "Roaming") / "Claude"
+        desktop = selected_location("APPDATA", home / "AppData" / "Roaming", {"claude-desktop"}) / "Claude"
         desktop_exe = local / "Programs" / "Claude" / "Claude.exe"
     elif sys.platform == "darwin":
         desktop = home / "Library" / "Application Support" / "Claude"
@@ -428,14 +437,14 @@ def _discover(target=None, scope="user", project_root=None, runtime=None):
     add("cursor", home / ".cursor", ["cursor"], home / ".cursor" / "mcp.json", value=cursor_stdio,
         skill_root=home / ".cursor" / "skills", executable=local / "Programs" / "cursor" / "Cursor.exe")
     root = xdg / "opencode"
-    oc = _location("OPENCODE_CONFIG", root / "opencode.jsonc")
+    oc = selected_location("OPENCODE_CONFIG", root / "opencode.jsonc", {"opencode"})
     if not os.environ.get("OPENCODE_CONFIG") and (root / "opencode.json").exists():
         oc = root / "opencode.json"
     add("opencode", root, ["opencode"], oc, "jsonc", "mcp",
         {"type": "local", "command": [python, "-I", "-m", "jev_decision.mcp"], "enabled": True,
          "environment": {"JEV_HOME": str(runtime.home)}}, root / "skills")
-    crush_global = _location("CRUSH_GLOBAL_CONFIG", xdg / "crush" / "crush.json", "crush.json")
-    crush_data = _location("CRUSH_GLOBAL_DATA", local / "crush", "crush.json")
+    crush_global = selected_location("CRUSH_GLOBAL_CONFIG", xdg / "crush" / "crush.json", {"crush"}, "crush.json")
+    crush_data = selected_location("CRUSH_GLOBAL_DATA", local / "crush" / "crush.json", {"crush"}, "crush.json")
     crush = crush_global if crush_global.exists() or os.environ.get("CRUSH_GLOBAL_CONFIG") else crush_data
     add("crush", local / "crush", ["crush"], crush, parent="mcp", value=dict(stdio, type="stdio"),
         skill_root=local / "crush" / "skills")

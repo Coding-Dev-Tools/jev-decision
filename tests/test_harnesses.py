@@ -34,6 +34,35 @@ def test_cli_reports_partial_install_as_failure(monkeypatch, capsys):
     assert json.loads(capsys.readouterr().out)["status"] == "partial"
 
 
+@pytest.mark.parametrize("action", ["install", "restore", "status"])
+def test_cli_explicit_user_scope_discards_saved_project_root(profiles, tmp_path, monkeypatch, capsys, action):
+    from jev_decision.cli import main
+    config = replace(RuntimeConfig.load(), harness_target="command-code", harness_scope="project", project_root=tmp_path)
+    monkeypatch.setattr(RuntimeConfig, "load", classmethod(lambda cls: config))
+    assert main(["harness", action, "--target", "command-code", "--scope", "user", "--dry-run"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "ok"
+    assert all(str(tmp_path / ".commandcode") != item["path"] for item in result["items"])
+    assert main(["harness", action, "--target", "command-code", "--scope", "user", "--project-root", str(tmp_path)]) == 2
+    assert json.loads(capsys.readouterr().out)["error_code"] == "project_root_requires_project_scope"
+
+
+@pytest.mark.parametrize("variable", ["CODEX_HOME", "OPENCODE_CONFIG", "CRUSH_GLOBAL_CONFIG", "CRUSH_GLOBAL_DATA", "XDG_CONFIG_HOME", "APPDATA"])
+def test_targeted_install_restore_ignores_other_clients_locations(profiles, monkeypatch, variable):
+    monkeypatch.setenv(variable, "relative-unrelated-location")
+    assert harnesses.run_harness_command("install", target="command-code", apply=True)["status"] == "ok"
+    assert harnesses.run_harness_command("restore", target="command-code", apply=True)["status"] == "ok"
+
+
+def test_project_install_ignores_user_location_but_user_install_validates_it(profiles, tmp_path, monkeypatch):
+    monkeypatch.setenv("OPENCODE_CONFIG", "relative-user-settings")
+    options = {"target": "opencode", "scope": "project", "project_root": tmp_path}
+    assert harnesses.run_harness_command("install", apply=True, **options)["status"] == "ok"
+    assert harnesses.run_harness_command("restore", apply=True, **options)["status"] == "ok"
+    with pytest.raises(harnesses.HarnessError, match="relative_harness_location_rejected"):
+        harnesses.run_harness_command("install", target="opencode")
+
+
 @pytest.fixture
 def profiles(tmp_path, monkeypatch):
     home = tmp_path / "fake home"

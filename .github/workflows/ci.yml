@@ -32,6 +32,12 @@ jobs:
         run: |
           python -m pytest tests/ -v
 
+      - name: Check configured Python lint rules
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
+        run: |
+          python -m pip install ruff==0.16.9
+          python -m ruff check .
+
       - name: Test CLI
         run: |
           jev --help

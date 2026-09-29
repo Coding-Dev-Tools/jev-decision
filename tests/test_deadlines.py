@@ -11,7 +11,12 @@ from decimal import Decimal
 import pytest
 
 from jev_decision.budget import BudgetDeadlineExceeded, BudgetLedger
-from jev_decision.client import DEFAULT_TYPESAFE_ENDPOINT, JevClient, _bounded_transport, _http_transport
+from jev_decision.client import (
+    DEFAULT_TYPESAFE_ENDPOINT,
+    JevClient,
+    _bounded_transport,
+    _http_transport,
+)
 from jev_decision.runtime import RuntimeConfig
 
 QUESTIONS = {"q": {"type": "noul", "instructions": "Is the evidence relevant?"}}

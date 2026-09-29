@@ -16,6 +16,7 @@ from pathlib import Path
 
 from .evidence_file import read_evidence_bytes
 from .harness_guards import MAX_SOURCE_BYTES, PROMPT_RUBRIC_SHA256, _spans
+from .jsonutil import json_equal
 from .policy import sanitize_evidence
 from .qualification import RETENTION_METHOD, canonical_sha256, summarize_report
 from .runtime import DEFAULT_MODEL
@@ -77,7 +78,11 @@ def _append_interval(intervals, start, end):
 def _local_repetition_selection(text, source_class, first_line=1):
     """Reproduce the deterministic control and its retained original intervals."""
     result, intervals = [], []
-    for span in _spans(text.splitlines(keepends=True), source_class, first_line):
+    lines = text.splitlines(keepends=True)
+    spans = _spans(lines, source_class, first_line)
+    if not spans:
+        return text, [(first_line, first_line + len(lines) - 1)] if lines else []
+    for span in spans:
         content = span["_text"]
         parts = content.splitlines(keepends=True)
         retained_end = span["end_line"]
@@ -342,6 +347,8 @@ def assemble_report(dataset, observations, provenance, prices):
                          and type(observation.get("recovery_calls")) is int and observation["recovery_calls"] >= 0
                          and _number(observation.get("preprocessing_ms"))
                          and _number(observation.get("total_elapsed_ms"))
+                         and _number(stats.get("latency_ms"))
+                         and observation["preprocessing_ms"] >= stats["latency_ms"]
                          and observation["total_elapsed_ms"] >= observation["preprocessing_ms"])
             complete_order &= observation.get("order") == position
             usage = observation.get("primary_usage", {})
@@ -374,11 +381,12 @@ def assemble_report(dataset, observations, provenance, prices):
                       "cache_state": observation.get("cache_state"), "trial": observation.get("trial"),
                       "total_elapsed_ms": observation.get("total_elapsed_ms"),
                       "preprocessing_ms": observation.get("preprocessing_ms"),
+                      "selection_latency_ms": stats.get("latency_ms"),
                       "modeled_primary_cost_usd": primary_cost, "modeled_jev_cost_usd": jev_cost,
                       "modeled_total_cost_usd": total_cost,
                       "critical_evidence_total": len(case["critical_facts"]),
                       "critical_evidence_retained": _critical_retained(sources[case["task_id"]], intervals, case["critical_facts"]),
-                      "success": (observation["answer"] == case["expected_answer"] if "answer" in observation else None)}
+                      "success": (json_equal(observation["answer"], case["expected_answer"]) if "answer" in observation else None)}
             matched[arm] = record
             arm_records.append(record)
         baseline, selected = matched["baseline"], matched["select"]

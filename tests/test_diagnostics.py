@@ -10,6 +10,22 @@ from jev_decision.client import JevClient
 from jev_decision.runtime import RuntimeConfig
 
 
+def test_setup_timezone_error_has_actionable_content_free_hint(capsys):
+    assert cli.main(["setup", "--non-interactive", "--credential-source", "env",
+                     "--daily-budget", "0", "--timezone", "Definitely/InvalidPrivateZone"]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["error_code"] == "invalid_timezone" and "--timezone UTC" in result["hint"]
+    assert "InvalidPrivateZone" not in json.dumps(result)
+
+
+def test_unrecognized_local_error_never_exposes_exception_text(monkeypatch, capsys):
+    def fail(_cls):
+        raise ValueError("private credential-like text")
+    monkeypatch.setattr(RuntimeConfig, "load", classmethod(fail))
+    assert cli.main(["doctor"]) == 2
+    assert json.loads(capsys.readouterr().out) == {"status": "unavailable", "error_code": "local_input_or_configuration_error"}
+
+
 def test_live_doctor_with_corrupt_ledger_keeps_budget_failure(tmp_path, monkeypatch, capsys):
     config = RuntimeConfig(home=tmp_path, credential_source="env")
     config.save()

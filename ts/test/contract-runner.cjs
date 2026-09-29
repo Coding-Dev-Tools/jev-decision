@@ -26,7 +26,7 @@ async function runCorpus() {
       apiKey: "fixture-only-not-a-real-key",
       fetchImpl: async () => new Response(materialize(spec), { status: statuses[Math.min(calls++, statuses.length - 1)], headers: { "content-type": "application/json" } }),
     });
-    const result = await client.evaluate(fixture.state, fixture.questions);
+    const result = await client.evaluate(fixture.state, spec.questions ?? fixture.questions);
     // Only elapsed time and random correlation ID vary across implementations.
     const { latency_ms, request_id, ...normalized } = result;
     results[spec.name] = normalized;

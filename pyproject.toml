@@ -23,6 +23,11 @@ classifiers = [
 jev = "jev_decision.cli:main"
 jev-mcp = "jev_decision.mcp:main"
 
+[project.urls]
+Repository = "https://github.com/Coding-Dev-Tools/jev-decision"
+Documentation = "https://github.com/Coding-Dev-Tools/jev-decision#readme"
+Issues = "https://github.com/Coding-Dev-Tools/jev-decision/issues"
+
 [project.optional-dependencies]
 test = ["pytest", "jsonschema>=4,<5"]
 mcp = ["mcp>=2.2,<3; python_version >= '3.10'"]

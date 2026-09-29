@@ -1,4 +1,4 @@
-"""CLI for managed, budgeted Jev advice; no command execution or approval."""
+"""Managed Jev advice and explicit local producer capture; no permission grants."""
 from __future__ import annotations
 
 import argparse
@@ -10,6 +10,22 @@ from pathlib import Path
 from .client import JevClient, _decode
 from .harness_guards import guard_bash_command, prune_tool_output, verify_turn_completion
 from .mcp import MCPServer, local_status, parse_questions, selection_options
+
+_LOCAL_ERRORS = {
+    "Unknown timezone; install timezone data or use UTC": ("invalid_timezone", "Install jev-decision[setup] for timezone data, or use --timezone UTC."),
+    "Install jev-decision[setup] or choose an environment reference": ("credential_backend_missing", "Install jev-decision[setup], or choose --credential-source env."),
+    "OS credential storage is unavailable; choose an environment reference": ("credential_backend_unavailable", "Unlock the OS credential store, or choose --credential-source env."),
+    "A supported OS credential backend is required; plaintext backends are refused": ("credential_backend_unsupported", "Use macOS Keychain, Linux Secret Service, or --credential-source env."),
+    "Non-interactive setup requires a credential source": ("credential_source_required", "Choose --credential-source env, dpapi, or keyring; or run interactive jev setup."),
+    "Non-interactive setup requires an explicit daily budget": ("daily_budget_required", "Set --daily-budget to a nonnegative amount; zero keeps provider requests disabled."),
+    "Daily budget must be finite and nonnegative": ("invalid_daily_budget", "Set --daily-budget to a finite nonnegative amount."),
+    "relative_harness_location_rejected": ("relative_harness_location_rejected", "Use absolute configuration paths for the selected harness."),
+    "project_root_requires_project_scope": ("project_root_requires_project_scope", "Use --scope project with --project-root, or omit --project-root for user scope."),
+    "project_scope_unsupported_for_target": ("project_scope_unsupported_for_target", "Use --scope user for this harness."),
+    "absolute_project_root_required": ("absolute_project_root_required", "Set --project-root to an existing absolute project directory."),
+    "project_root_not_found": ("project_root_not_found", "Set --project-root to an existing project directory."),
+    "absolute_new_directory_and_producer_required": ("invalid_capture_arguments", "Use capture --directory ABSOLUTE_NEW_DIRECTORY -- PROGRAM [ARGS...]."),
+}
 
 
 def _print(value):
@@ -35,6 +51,9 @@ def main(argv=None):
     parser = argparse.ArgumentParser(prog="jev", description="Managed Jev advisory decisions")
     parser.add_argument("--runtime-home", help="Absolute shared state directory for this invocation")
     commands = parser.add_subparsers(dest="subcommand", required=True)
+    from .capture import configure_parser
+    capture = commands.add_parser("capture", help="Capture an explicit producer to original files; return only its reference")
+    configure_parser(capture)
     setup = commands.add_parser("setup", help="Guide credential source, roots, budget and harness selection")
     setup.add_argument("--non-interactive", action="store_true")
     setup.add_argument("--credential-source", choices=["env", "dpapi", "keyring"])
@@ -95,6 +114,9 @@ def main(argv=None):
     commands.add_parser("mcp", help="Run the stdio server")
     args = parser.parse_args(argv)
     try:
+        if args.subcommand == "capture":
+            from .capture import capture_output
+            return capture_output(args.directory, args.command)
         from .runtime import RuntimeConfig
         if args.runtime_home:
             home = Path(args.runtime_home).expanduser()
@@ -129,9 +151,12 @@ def main(argv=None):
             target = args.target or config.harness_target
             if target is None and args.action in {"install", "restore"}:
                 raise ValueError("select_harness_target_required")
+            scope = args.scope or config.harness_scope
+            project_root = args.project_root
+            if project_root is None and scope == "project":
+                project_root = config.project_root
             result = run_harness_command(args.action, apply=args.apply and not args.dry_run,
-                target=target, scope=args.scope or config.harness_scope,
-                project_root=args.project_root or config.project_root, config=config)
+                target=target, scope=scope, project_root=project_root, config=config)
             _print(result)
             return 0 if result.get("status") == "ok" else 2
         if args.subcommand == "doctor":
@@ -191,8 +216,12 @@ def main(argv=None):
             result = {"output": output, "stats": stats}
         _print(result)
         return 2 if result.get("status") == "unavailable" else 0
-    except (ValueError, OSError, UnicodeError, RuntimeError):
-        _print({"status": "unavailable", "error_code": "local_input_or_configuration_error"})
+    except (ValueError, OSError, UnicodeError, RuntimeError) as error:
+        diagnostic = _LOCAL_ERRORS.get(str(error))
+        result = {"status": "unavailable", "error_code": "local_input_or_configuration_error"}
+        if diagnostic:
+            result.update(error_code=diagnostic[0], hint=diagnostic[1])
+        _print(result)
         return 2
 
 if __name__ == "__main__":

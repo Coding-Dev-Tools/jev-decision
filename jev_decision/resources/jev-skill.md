@@ -24,6 +24,10 @@ Example input:
 
 For a saved log that has not entered model context, use `jev_read_evidence` or `evidence --file <approved-log> --goal <goal> --json`. `off` reads without scoring; `shadow` measures while retaining; `select` requires an operator-configured qualified profile and the actual matching workload identity. Do not change the mode or profile to obtain omission. Keep capture stdout, stderr, producer exit status and original artifacts. Use page metadata and the original hash for later range recovery. Scoring already ingested text cannot reclaim its context tokens.
 
+For an authorized command that has not run, the same installed CLI offers `capture --directory <absolute-new-directory> -- <program> <arguments>`. Run it through the ordinary shell permission flow and retain its producer exit status. It saves both streams and returns only a manifest reference; no Jev setup or repository checkout is needed.
+
 For classification or routing, ask which descriptive category fits one input. For relevance, ask how one passage supports the stated goal, retaining contradictory evidence. For verification gaps, assess missing evidence without treating the result as executed proof. Apply thresholds in deterministic code only after development/held-out calibration for that workload; probabilities and confidence are not demonstrated accuracy.
+
+Keep arithmetic, counts, date comparisons and cross-question consistency rules in code. Prefer one direct question pointing to named state fields; unrelated state and indirect wording reduce reliability. Do not reuse a Noul threshold for a Choice question. See the provider's [Jev 1.13 guidance](https://docs.typesafe.ai/model-jaggedness/jev-1.13).
 
 If Jev is unavailable, the budget is exhausted, or an answer is uncertain, continue normal reasoning and deterministic checks. Do not loop retries, bypass the shared runtime, increase the budget, switch providers, or treat a score as permission or proof. Retain contradictory evidence and validate consequential conclusions with the original source or executable tests.

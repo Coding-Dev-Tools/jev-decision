@@ -53,10 +53,10 @@ The skill directs the agent to call `mcp__jev__jev_read_evidence` with a bounded
 & $jevPython -I -m jev_decision.cli --runtime-home $jevState evidence --file 'C:/work/example/.jev-captures/run-001/stderr.log' --goal 'Explain the first failed test' --mode off --max-lines 200 --json
 ```
 
-For a command that has not run, use the repository's [capture helper](../examples/capture.py) through the ordinary shell tool, under the same permissions as the producer. It executes an argv command without a shell and saves stdout, stderr, exit status, sizes and hashes. This synthetic example demonstrates a failed producer while returning only a capture reference:
+For a command that has not run, use the installed `capture` subcommand through the ordinary shell tool, under the same permissions as the producer. No repository checkout is needed. It executes an argv command without a shell and saves stdout, stderr, exit status, sizes and hashes. This synthetic example demonstrates a failed producer while returning only a capture reference:
 
 ```powershell
-& $jevPython 'C:/src/jev-decision/examples/capture.py' --directory 'C:/work/example/.jev-captures/run-001' -- $jevPython -c 'import sys; print("collected 3 tests"); print("FAILED test_export", file=sys.stderr); sys.exit(7)'
+& $jevPython -I -m jev_decision.cli capture --directory 'C:/work/example/.jev-captures/run-001' -- $jevPython -c 'import sys; print("collected 3 tests"); print("FAILED test_export", file=sys.stderr); sys.exit(7)'
 ```
 
 Use a new capture directory for each run. Retain the helper's exit status `7` and `capture.json`; the helper does not reinterpret success. Read both saved streams when relevant. Never pipe the original log through the agent and then claim later scoring saved its context tokens. For output above the evidence reader's file limit, retain the original and produce bounded, provenance-preserving chunks before reading; a truncated excerpt is not a complete run.

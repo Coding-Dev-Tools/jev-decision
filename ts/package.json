@@ -18,6 +18,9 @@
     "mcp"
   ],
   "author": "Coding-Dev-Tools",
+  "repository": { "type": "git", "url": "https://github.com/Coding-Dev-Tools/jev-decision.git", "directory": "ts" },
+  "homepage": "https://github.com/Coding-Dev-Tools/jev-decision/tree/main/ts#readme",
+  "bugs": { "url": "https://github.com/Coding-Dev-Tools/jev-decision/issues" },
   "license": "MIT",
   "engines": { "node": ">=20" },
   "files": ["dist/index.js", "dist/index.d.ts", "README.md", "LICENSE"],

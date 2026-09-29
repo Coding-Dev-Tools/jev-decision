@@ -1,8 +1,8 @@
 """Advisory decisions; permissions and test truth belong to the native harness."""
 from __future__ import annotations
 
-import hashlib
 import copy
+import hashlib
 import json
 import math
 import queue
@@ -15,8 +15,13 @@ from typing import Any, Dict, Optional, Tuple
 from .client import DEFAULT_MODEL, JevClient
 from .evidence_file import read_evidence_bytes
 from .primitives import ChoiceQuestion, NoulQuestion, ScoreQuestion
-from .qualification import (QualificationError, SOURCE_CLASSES, canonical_sha256,
-                            validate_qualification, validate_thresholds)
+from .qualification import (
+    SOURCE_CLASSES,
+    QualificationError,
+    canonical_sha256,
+    validate_qualification,
+    validate_thresholds,
+)
 
 
 def batch_metadata(batch: Any) -> Dict[str, Any]:
@@ -49,9 +54,9 @@ def verify_turn_completion(goal: str, recent_actions: str, last_output: str, *,
             "verification_authority": "recorded_execution_evidence"}
 
 _PROTECTED = re.compile(
-    r"error|fail|exception|traceback|warning|assert|exit(?:\s+code|\s+status)?|"
+    r"error|fail|exception|traceback|warning|\b(?:warn|fatal|critical)\b|assert|exit(?:\s+code|\s+status)?|"
     r"\b(?:passed|skipped|xfailed|xpassed|tests?|checks?)\b|^[-+@]|\b(?:must|required|expected|actual)\b", re.I | re.M)
-_LOG_START = re.compile(r"^(?:\d{4}-\d\d-\d\d[ T]|\[?(?:TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL)\b)", re.I)
+_LOG_START = re.compile(r"^(?:\d{4}-\d\d-\d\d[ T]|\[?(?:TRACE|DEBUG|INFO|WARN(?:ING)?|ERROR|FATAL|CRITICAL)\b)", re.I)
 _TRACE_START = re.compile(r"Traceback\s*\(|^(?:panic:|.*(?:Error|Exception):)", re.I)
 _DIFF_START = re.compile(r"^(?:diff --git |@@ |--- |\+\+\+ )")
 _STACK_DETAIL = re.compile(r"\b(?:Traceback|Caused by|During handling of|The above exception)\b|"

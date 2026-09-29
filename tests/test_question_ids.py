@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from jev_decision import JevClient, NoulQuestion, ChoiceQuestion, ScoreQuestion
+from jev_decision import ChoiceQuestion, JevClient, NoulQuestion, ScoreQuestion
 from jev_decision.runtime import RuntimeConfig
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -23,6 +23,35 @@ class Ledger:
 
     def settle(self, reservation, token_count=None):
         pass
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_redacted_choice_labels_are_restored_for_current_caller_and_cache(typed):
+    calls, ledger = [], Ledger()
+
+    def transport(request, *_):
+        payload = json.loads(request.data)
+        calls.append(payload)
+        criteria = payload["questions"]["route"]["criteria"]
+        selected = next(key for key in criteria if key.startswith("password="))
+        return 200, json.dumps({"model": payload["model"], "answers": {"route": {
+            "type": "choice", "choice": selected, "confidence": .9,
+            "probabilities": {key: 1 if key == selected else 0 for key in criteria}}}}).encode()
+
+    client = JevClient(api_key="fixture-api-key", runtime=RuntimeConfig(enabled=True), budget_ledger=ledger, transport=transport)
+    for index, label in enumerate(("password=alpha", "password=beta")):
+        criteria = {label: None, "other": None}
+        questions = ([ChoiceQuestion("route", "Choose the appropriate route", criteria=criteria)] if typed else
+                     {"route": {"type": "choice", "instructions": "Choose the appropriate route", "criteria": criteria}})
+        batch = client.evaluate("sample", questions)
+        assert batch.status == "ok" and batch.source == ("provider" if index == 0 else "cache")
+        decision = batch.get_choice("route")
+        assert decision.selected == label and set(decision.probabilities) == set(criteria)
+    assert len(calls) == ledger.reservations == 1
+    assert "alpha" not in json.dumps(calls) and "beta" not in json.dumps(calls)
+    collision = {"route": {"type": "choice", "instructions": "Choose", "criteria": {"password=alpha": None, "password=beta": None}}}
+    assert client.evaluate("sample", collision).error_code == "invalid_request"
+    assert len(calls) == ledger.reservations == 1
 
 
 def run_case(spec, typed):

@@ -28,6 +28,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Union
 
+from .jsonutil import json_equal
 from .primitives import (
     ChoiceDecision,
     ChoiceQuestion,
@@ -193,12 +194,10 @@ def _rounded_bounds(probabilities: Dict[str, float]) -> Optional[Dict[str, Tuple
 
 
 def _consistent_score(score: float, probabilities: Dict[str, float]) -> bool:
-    weighted = math.fsum(int(key) * value for key, value in probabilities.items())
-    if math.isclose(score, weighted, abs_tol=PROBABILITY_TOLERANCE, rel_tol=0):
-        return True
     bounds = _rounded_bounds(probabilities)
     if bounds is None:
-        return False
+        weighted = math.fsum(int(key) * value for key, value in probabilities.items())
+        return math.isclose(score, weighted, abs_tol=PROBABILITY_TOLERANCE, rel_tol=0)
     lower = math.fsum(pair[0] for pair in bounds.values())
     if lower > 1 + 1e-9 or math.fsum(pair[1] for pair in bounds.values()) < 1 - 1e-9:
         return False
@@ -262,7 +261,7 @@ def validate_response(payload: Any, questions: Dict[str, Any], model: str) -> Di
             decisions[question_id] = ChoiceDecision(question_id, selected, probabilities, confidence)
         else:
             legend = {str(index): level for index, level in enumerate(question["criteria"])}
-            if answer["legend"] != legend:
+            if not json_equal(answer["legend"], legend):
                 raise ValueError("invalid_legend")
             probabilities = _distribution(answer["probabilities"], legend)
             score = answer["score"]
@@ -590,29 +589,34 @@ class JevClient:
             return finish("invalid_request")
         if time.monotonic() >= deadline:
             return finish("timeout")
-        def prepare() -> Tuple[Dict[str, Any], Dict[str, str], bytes]:
+        def prepare() -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Dict[str, str]], bytes]:
             from .policy import sanitize_excerpt, sanitize_state
 
             validate_state(state)
             checked = normalize_questions(questions)
             # Sanitize all string-bearing request values, including instructions.
             clean_state = sanitize_state(state, secrets=(self._api_key,))
-            wire_questions, original_ids = {}, {}
+            wire_questions, original_ids, original_choices = {}, {}, {}
             for question_id, question in checked.items():
                 wire_id = sanitize_excerpt(question_id, secrets=(self._api_key,))
                 if wire_id in original_ids:
                     raise ValueError("ambiguous_question_ids")
                 original_ids[wire_id] = question_id
                 wire_questions[wire_id] = sanitize_state(question, secrets=(self._api_key,))
+                if question["type"] == "choice":
+                    original_choices[wire_id] = {
+                        sanitize_excerpt(label, secrets=(self._api_key,)): label
+                        for label in question["criteria"]
+                    }
             checked = normalize_questions(wire_questions)
             validate_state(clean_state)
             body = json.dumps(
                 {"model": requested_model, "state": clean_state, "questions": checked},
                 ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True,
             ).encode("utf-8")
-            return checked, original_ids, body
+            return checked, original_ids, original_choices, body
         try:
-            checked, original_ids, body = _bounded_call(prepare, deadline)
+            checked, original_ids, original_choices, body = _bounded_call(prepare, deadline)
         except TimeoutError:
             return finish("timeout")
         except Exception:
@@ -626,6 +630,10 @@ class JevClient:
         def restore_ids() -> DecisionBatch:
             for wire_id, decision in batch.decisions.items():
                 decision.id = original_ids[wire_id]
+                if isinstance(decision, ChoiceDecision):
+                    labels = original_choices[wire_id]
+                    decision.selected = labels[decision.selected]
+                    decision.probabilities = {labels[key]: value for key, value in decision.probabilities.items()}
             batch.decisions = {original_ids[key]: value for key, value in batch.decisions.items()}
             return batch
 

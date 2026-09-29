@@ -131,7 +131,7 @@ def _os_keyring():
             if identity(candidate) in allowed and candidate.priority > 0:
                 return candidate
     except ImportError:
-        raise CredentialError("Install the optional keyring extra or choose an environment reference") from None
+        raise CredentialError("Install jev-decision[setup] or choose an environment reference") from None
     except Exception:
         raise CredentialError("OS credential storage is unavailable; choose an environment reference") from None
     raise CredentialError("A supported OS credential backend is required; plaintext backends are refused")

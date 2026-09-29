@@ -10,11 +10,15 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_capture_preserves_binary_streams_exit_status_and_originals(tmp_path):
+@pytest.mark.parametrize("entry", ["example", "cli", "module"])
+def test_capture_preserves_binary_streams_exit_status_and_originals(tmp_path, entry):
     target = tmp_path / "evidence"
     producer = "import sys; sys.stdout.buffer.write('日本語 😀\\n'.encode()); sys.stderr.buffer.write(b'warning\\r\\n'); sys.exit(7)"
-    result = subprocess.run([sys.executable, str(ROOT / "examples/capture.py"), "--directory", str(target), "--",
-                             sys.executable, "-c", producer], cwd=tmp_path, capture_output=True, timeout=10)
+    launcher = {"example": [str(ROOT / "examples/capture.py")], "cli": ["-m", "jev_decision.cli", "capture"],
+                "module": ["-m", "jev_decision.capture"]}[entry]
+    result = subprocess.run([sys.executable, *launcher, "--directory", str(target), "--",
+                             sys.executable, "-c", producer], cwd=tmp_path if entry == "example" else ROOT,
+                            capture_output=True, timeout=10)
     assert result.returncode == 7
     reference = json.loads(result.stdout)
     assert reference["producer_exit_status"] == 7 and "日本語" not in result.stdout.decode()
@@ -22,6 +26,33 @@ def test_capture_preserves_binary_streams_exit_status_and_originals(tmp_path):
     assert Path(manifest["streams"]["stdout"]["path"]).read_bytes() == "日本語 😀\n".encode()
     assert Path(manifest["streams"]["stderr"]["path"]).read_bytes() == b"warning\r\n"
     assert manifest["originals_user_owned"] is True
+
+
+def test_capture_cli_bypasses_runtime_and_preserves_argv(tmp_path, monkeypatch, capsys):
+    from jev_decision.cli import main
+    from jev_decision.runtime import RuntimeConfig
+    monkeypatch.setattr(RuntimeConfig, "load", classmethod(lambda cls: pytest.fail("capture loaded runtime")))
+    target = tmp_path / "captured"
+    marker = tmp_path / "shell expansion must not run"
+    arguments = ["--flag", "two words", f"$(touch {marker})", "日本語"]
+    producer = "import json,sys; print(json.dumps(sys.argv[1:])); sys.exit(7)"
+    assert main(["capture", "--directory", str(target), "--", sys.executable, "-c", producer, *arguments]) == 7
+    reference = json.loads(capsys.readouterr().out)
+    assert reference["producer_exit_status"] == 7 and not marker.exists()
+    assert json.loads((target / "stdout.log").read_bytes()) == arguments
+    original = (target / "stdout.log").read_bytes()
+    assert main(["capture", "--directory", str(target), "--", sys.executable, "-c", "print('overwrite')"]) == 2
+    assert (target / "stdout.log").read_bytes() == original
+
+
+def test_capture_failed_launch_still_records_status_and_streams(tmp_path, capsys):
+    from jev_decision.capture import capture_output
+    target = tmp_path / "failed-launch"
+    assert capture_output(target, [str(tmp_path / "missing-executable")]) == 127
+    reference = json.loads(capsys.readouterr().out)
+    manifest = json.loads(Path(reference["capture"]).read_bytes())
+    assert manifest["producer_exit_status"] == 127 and manifest["error_code"] == "producer_launch_failed"
+    assert all(value["bytes"] == 0 for value in manifest["streams"].values())
 
 
 def test_cli_stdin_ignores_windows_pipe_locale():

@@ -4,13 +4,13 @@ A primary model saves context tokens only when the large output never enters its
 
 ## Capture a producer
 
-The complete [Python helper](../examples/capture.py) writes stdout and stderr directly to separate binary files, saves a metadata manifest with original hashes and exit status, prints only its reference, and exits with the producer's status. Separate streams preserve their bytes but do not claim a combined chronological ordering. Use a new directory each time; an existing directory is refused. Configure the producer for UTF-8 if it is to be read by the evidence interface.
+The installed `jev capture` command writes stdout and stderr directly to separate binary files, saves a metadata manifest with original hashes and exit status, prints only its reference, and exits with the producer's status. It requires no runtime setup, credentials, or repository checkout. The producer is an explicit argv command executed under ordinary shell permissions; no shell expansion is performed. MCP never executes it. Separate streams preserve their bytes but do not claim a combined chronological ordering. Use a new directory each time; an existing directory is refused. Configure the producer for UTF-8 if it is to be read by the evidence interface. The [checkout helper](../examples/capture.py) and shell wrappers remain compatible.
 
 POSIX shell (works when the enclosing script uses `set -e`):
 
 ```sh
 capture_status=0
-sh examples/capture.sh "$PWD/.evidence/run-001" python -X utf8 -m pytest || capture_status=$?
+jev capture --directory "$PWD/.evidence/run-001" -- python -X utf8 -m pytest || capture_status=$?
 # The command above returned only a capture.json reference, not the test output.
 # Preserve capture_status in your surrounding harness; do not replace failure with success.
 ```
@@ -19,7 +19,7 @@ PowerShell:
 
 ```powershell
 $captureDirectory = Join-Path (Get-Location).Path '.evidence\run-001'
-& ./examples/capture.ps1 -Directory $captureDirectory -Python python -Command python, '-X', 'utf8', '-m', 'pytest'
+jev capture --directory $captureDirectory -- python -X utf8 -m pytest
 $producerStatus = $LASTEXITCODE
 # Preserve producerStatus in the surrounding harness.
 ```

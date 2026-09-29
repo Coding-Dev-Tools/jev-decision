@@ -5,7 +5,13 @@ import json
 
 import pytest
 
-from jev_decision.evaluation import arm_order, assemble_report, load_dataset, local_repetitions, write_profile
+from jev_decision.evaluation import (
+    arm_order,
+    assemble_report,
+    load_dataset,
+    local_repetitions,
+    write_profile,
+)
 from jev_decision.evidence import read_evidence_file
 from jev_decision.harness_guards import PROMPT_RUBRIC_SHA256, _select_from_shadow, _spans
 from jev_decision.qualification import canonical_sha256, load_qualification, validate_qualification
@@ -31,6 +37,8 @@ def measured_fixture(tmp_path, *, text_factory=None, facts=None, count=30, sourc
             "goal": "Identify the failure", "source": source_path.name, "source_class": source_class,
             "source_sha256": source, "critical_facts": facts or ["exit status 1"], "expected_answer": {"code": 1}})
         baseline = read_evidence_file(str(source_path), "Identify the failure", [tmp_path], mode="off", source_class=source_class)
+        # Synthetic matched observations use known fixture timings, not disk jitter.
+        baseline["stats"]["latency_ms"] = .5
         shadow = copy.deepcopy(baseline)
         shadow["stats"].update(mode="shadow", status="ok", calls=1, attempts=1,
             requested_model="jev-1.13.0", resolved_model="jev-1.13.0", source_sha256=source,
@@ -113,6 +121,40 @@ def test_jev_usage_cannot_be_underreported(tmp_path):
     observation = next(row for row in args[1] if row["arm"] == "select")
     observation["jev_usage"] = {"input_tokens": 0, "output_tokens": 0}
     assert assemble_report(*args)["qualification_check"]["eligible"] is False
+
+
+@pytest.mark.parametrize("latency", [4000, None, True, -1])
+def test_task_timing_must_include_valid_selection_latency(tmp_path, latency):
+    args = measured_fixture(tmp_path)
+    observation = next(row for row in args[1] if row["arm"] == "select")
+    observation["tool_response"]["stats"]["latency_ms"] = latency
+    observation["tool_response_sha256"] = canonical_sha256(observation["tool_response"])
+    assert assemble_report(*args)["qualification_check"]["eligible"] is False
+
+
+def test_boolean_answers_do_not_pass_numeric_task_grading(tmp_path):
+    args = measured_fixture(tmp_path)
+    for observation in args[1]:
+        if observation["arm"] == "select":
+            observation["answer"] = {"code": True}
+    report = assemble_report(*args)
+    assert report["qualification_check"]["eligible"] is False
+    assert all(row["success"] is False for row in report["arms"] if row["arm"] == "select")
+
+
+def test_json_equality_is_recursive_and_accepts_equivalent_json_numbers():
+    from jev_decision.jsonutil import json_equal
+    assert json_equal({"nested": [0, {"value": 1}]}, {"nested": [0.0, {"value": 1.0}]})
+    assert not json_equal({"nested": [0, {"value": 1}]}, {"nested": [False, {"value": True}]})
+    assert not json_equal({"nested": [True]}, {"nested": [1]})
+
+
+@pytest.mark.parametrize("source_class", ["test_log", "build_log", "jsonl", "application_log"])
+def test_deterministic_control_preserves_unrecognized_page(source_class):
+    from jev_decision.evaluation import _local_repetition_selection
+    text = "detail below without header\nsecond line\n"
+    output, intervals = _local_repetition_selection(text, source_class, first_line=101)
+    assert output == text and intervals == [(101, 102)]
 
 
 def test_four_unique_arms_required(tmp_path):

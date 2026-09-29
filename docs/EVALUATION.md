@@ -61,6 +61,8 @@ Observations are a JSON array with exactly one entry per `(task_id, arm)`:
 
 This is an intentionally incomplete illustration; copy the actual tool response, including its `source_ref`, `page` and full stats. The collector checks semantic-arm mode, requested/resolved Jev model, rubric, source class, thresholds, status, usage, source and response hashes. Baseline/local must make zero Jev calls. Responses from old rubrics, offline calls, unmatched trials, pages or cache conditions cannot be stamped current. Task success is computed against independent expected answers, not a reported success flag.
 
+Record `preprocessing_ms` around the whole evidence operation, including local reads and scoring. It must cover the response's measured `stats.latency_ms`; total task time must cover preprocessing. Missing, invalid, or contradictory timings cannot qualify. Exact-answer grading distinguishes JSON booleans from numbers, including nested values. Unknown-format pages in the deterministic control retain their original text.
+
 Canonical hashes use UTF-8 JSON, sorted keys, separators `(',', ':')`, `ensure_ascii=False`, and no NaN. `jev_decision.qualification.canonical_sha256` implements that convention.
 
 The provenance JSON needs `run_mode: "live"`, the four route identity fields, and positive `campaign_budget_usd`. The collector derives campaign modeled cost across **all four arms**, counterbalancing, source/label hashes, and independent grading. The price JSON needs:

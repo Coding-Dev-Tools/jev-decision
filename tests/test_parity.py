@@ -52,7 +52,7 @@ def normalized_result(spec):
 
     client = JevClient(api_key="fixture-only-not-a-real-key", runtime=RuntimeConfig(enabled=True),
                        transport=transport, budget_ledger=FixtureLedger())
-    result = client.evaluate(FIXTURE["state"], FIXTURE["questions"]).to_dict()
+    result = client.evaluate(FIXTURE["state"], spec.get("questions", FIXTURE["questions"])).to_dict()
     result.pop("latency_ms")
     result.pop("request_id")
     return result

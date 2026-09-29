@@ -4,8 +4,8 @@ The source validation on 2026-09-28 used Windows, Python 3.12.10, Node 24.15.0 a
 
 | Check | Observed result |
 | --- | --- |
-| Full Python suite | 438 passed, 1 skipped (Windows symlink privilege) |
-| TypeScript build + Node suite | 83 passed |
+| Full Python suite | 520 passed, 1 skipped (Windows symlink privilege) |
+| TypeScript build + Node suite | 86 passed |
 | Shared Python/TypeScript fixtures | Passed against compiled TypeScript |
 | Actual stdio subprocess | Legacy handshake, automatic discovery and 2026-07-28 passed; separate 2024-11-05 negotiation passed |
 | Pipe integrity | Windows Unicode, malformed/oversized input recovery and UTF-8 JSON stdin passed |
@@ -16,9 +16,13 @@ The source validation on 2026-09-28 used Windows, Python 3.12.10, Node 24.15.0 a
 | Evidence and policy review | Opened-file validation, real Windows junction races, stale roots, policy downgrade matrix and credential-free diagnostics passed |
 | Setup credential preservation | Existing keyring references survive interactive reconfiguration; fresh setup/backend changes still offer masked entry |
 | Qualification review | Source-span grading excludes markers/redaction/gaps, matches pages across arms, detects tampering and rejects old grading methods |
-| Static checks | Python undefined/unused-name checks and Git whitespace checks passed |
+| Release review regressions | Rounded-score feasibility, typed JSON equality, restored Choice labels, timing consistency, severity protection and isolated harness scopes passed |
+| Installed capture | CLI preserves argv, binary streams and producer exit status without runtime configuration; original checkout wrappers retained |
+| Static checks | Full configured Ruff rules and Git whitespace checks passed |
 
 CI runs the suite on Windows, macOS and Linux with Python 3.9–3.13. Core-only Python 3.9 skips optional SDK tests. Python 3.12 jobs also install wheel and source artifacts outside the checkout; all three Node jobs check npm archive installation. CI status must be read for the exact PR head before claiming those remote checks passed.
+
+The [comprehensive release review](release-review-20260928.md) records the four independent review lanes, corrected edge cases and remaining evidence boundaries.
 
 ## Offline four-arm report
 

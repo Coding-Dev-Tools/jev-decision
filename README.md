@@ -73,13 +73,21 @@ else:
 
 Runnable JSON examples: [classification](examples/classify.json), [evidence relevance](examples/relevance.json), [routing](examples/route.json), and [verification gaps](examples/verification-gap.json). Run `jev decide --file examples/route.json` after setup. Skip Jev when a deterministic rule or test already answers the question.
 
-Use non-sensitive question IDs. Recognizable secrets in IDs are redacted before transmission, and redaction collisions reject the request. Successful results restore the caller's original IDs, including cached results; those IDs are intentionally part of the local result.
+Use non-sensitive question IDs and Choice labels. Recognizable secrets in Python IDs and labels are redacted before transmission, and redaction collisions reject the request. Successful results restore the caller's original IDs and labels, including cached results; those values are intentionally part of the local result. TypeScript sanitizes question IDs; applications own body and criterion sanitization.
 
 Choice supports native null descriptions. Score uses 2–10 ordered descriptive levels and preserves fractional values and legends. Noul returns a probability; separate confidence is unknown. Missing usage stays `null`. Python and TypeScript share contract fixtures, including valid provider probability rounding.
 
 ## Evidence before model ingestion
 
 Capture output to original artifacts first, then return references to the agent. [Complete PowerShell/POSIX examples](docs/EVIDENCE.md) preserve stdout, stderr, and producer exit status. Sending a log to the primary model and then asking Jev to shorten it cannot reclaim tokens already consumed.
+
+The installed package includes capture; it needs no Jev setup or credential:
+
+```sh
+jev capture --directory /absolute/project/.evidence/run-001 -- python -X utf8 -m pytest
+```
+
+This explicitly runs the supplied producer under the shell user's permissions, saves both streams, returns only a manifest reference, and preserves the producer's exit status. Use a new directory for each run. MCP remains advisory and never launches producers.
 
 | Mode | Behavior |
 | --- | --- |
