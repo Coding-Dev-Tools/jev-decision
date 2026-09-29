@@ -579,8 +579,10 @@ export class JevClient implements JevEvaluator {
           // Failed earlier attempts may still have been billed; never report the final
           // response's token counts as a known total across an uncertain retry.
           const usage = attempts === 1 ? parsed.usage : { input_tokens: null, output_tokens: null };
-          if (parsed.usage.input_tokens !== null && parsed.usage.input_tokens > MAX_INPUT_TOKENS) {
-            // Keep known usage, but never expose or cache an anomalous answer.
+          const reportedInput = isRecord(data) && isRecord(data.usage) ? data.usage.input_tokens : undefined;
+          if (typeof reportedInput === "number" && Number.isInteger(reportedInput) && reportedInput > MAX_INPUT_TOKENS) {
+            // An unsafe integer becomes unknown telemetry, but its clear overrun
+            // must still prevent exposing or caching an anomalous answer.
             return { ...unavailable(requestId, started, "invalid_response", attempts), usage };
           }
           return { status: "ok", source: "provider", ...parsed, usage, requested_model: DEFAULT_MODEL, latency_ms: performance.now() - started, attempts, request_id: requestId, error_code: null, is_fallback: false };

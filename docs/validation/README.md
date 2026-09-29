@@ -4,9 +4,10 @@ The source validation on 2026-09-28–29 used Windows, Python 3.12.10, Node 24.1
 
 | Check | Observed result |
 | --- | --- |
-| Full Python suite | 560 passed, 1 skipped (Windows symlink privilege) |
+| Full Python suite | 572 passed, 1 skipped (Windows symlink privilege) |
 | TypeScript build + Node suite | 86 passed |
 | Shared Python/TypeScript fixtures | Passed against compiled TypeScript |
+| Provider usage limits | Input overruns reject answers before caching; unsafe telemetry stays unknown and unsupported accounting retains a conservative hold |
 | Actual stdio subprocess | Legacy handshake, automatic discovery and 2026-07-28 passed; separate 2024-11-05 negotiation passed |
 | Pipe integrity | Windows Unicode, malformed/oversized input recovery and UTF-8 JSON stdin passed |
 | Native capture wrapper | PowerShell preserved producer exit 7, stdout and stderr artifacts; POSIX counterpart runs in CI |

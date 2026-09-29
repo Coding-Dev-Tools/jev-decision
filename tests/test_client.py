@@ -15,8 +15,20 @@ from jev_decision import (
     ScoreQuestion,
     normalize_questions,
 )
-from jev_decision.budget import BudgetError, BudgetExceeded
-from jev_decision.client import DEFAULT_MODEL, DEFAULT_TYPESAFE_ENDPOINT, _http_transport
+from jev_decision.budget import (
+    MAX_SETTLEMENT_TOKENS,
+    NANODOLLARS_PER_DOLLAR,
+    NANODOLLARS_PER_TOKEN,
+    BudgetError,
+    BudgetExceeded,
+    BudgetLedger,
+)
+from jev_decision.client import (
+    DEFAULT_MODEL,
+    DEFAULT_TYPESAFE_ENDPOINT,
+    MAX_SAFE_USAGE_INTEGER,
+    _http_transport,
+)
 from jev_decision.runtime import RuntimeConfig
 
 KEY = "fixture-only-key-no-provider-access"
@@ -414,6 +426,36 @@ def test_settlement_failure_prevents_exposing_a_success(make_client):
     batch = client.evaluate("An excerpt", noul())
     assert batch.error_code == "budget_unavailable"
     assert not batch.decisions
+
+
+@pytest.mark.parametrize("tokens", [64001, MAX_SETTLEMENT_TOKENS, MAX_SETTLEMENT_TOKENS + 1,
+                                  MAX_SAFE_USAGE_INTEGER, MAX_SAFE_USAGE_INTEGER + 1, 10**100],
+                         ids=["above-provider-limit", "accounting-limit", "above-accounting-limit",
+                              "safe-integer-limit", "unsafe-integer", "huge-count"])
+def test_anomalous_usage_is_a_provider_error_with_conservative_accounting(tmp_path, tokens):
+    config = RuntimeConfig(home=tmp_path, enabled=True)
+    ledger = BudgetLedger(config)
+    calls = []
+
+    def transport(request, *_):
+        calls.append(1)
+        payload = response_for(request)
+        payload["usage"] = {"input_tokens": tokens, "output_tokens": 3}
+        return wire(payload)
+
+    client = JevClient(api_key=KEY, runtime=config, budget_ledger=ledger, transport=transport)
+    result = client.evaluate("An excerpt", noul())
+    assert result.error_code == "invalid_response" and not result.decisions
+    assert result.attempts == len(calls) == 1
+    assert result.usage == {"input_tokens": tokens if tokens <= MAX_SAFE_USAGE_INTEGER else None, "output_tokens": 3}
+    assert not client._cache
+    status = ledger.status()  # The ledger is healthy even for unsupported counts.
+    if tokens <= MAX_SETTLEMENT_TOKENS:
+        assert status["settled_attempts"] == 1 and status["held_usd"] == 0
+        assert status["known_spend_usd"] == tokens * NANODOLLARS_PER_TOKEN / NANODOLLARS_PER_DOLLAR
+    else:
+        assert status["unknown_attempts"] == 1 and status["known_spend_usd"] == 0
+        assert status["held_usd"] == status["reservation_usd"]
 
 
 def test_native_transport_does_not_redirect_or_read_error_bodies(monkeypatch):

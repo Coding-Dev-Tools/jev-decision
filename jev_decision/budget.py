@@ -16,6 +16,7 @@ from typing import Any, Callable, Dict, Optional
 from .runtime import RuntimeConfig
 
 MAX_TOKENS_PER_ATTEMPT = 64_000
+MAX_SETTLEMENT_TOKENS = 100_000_000
 NANODOLLARS_PER_TOKEN = 42  # $0.042 per million input tokens; outputs are free.
 RESERVATION_NANODOLLARS = MAX_TOKENS_PER_ATTEMPT * NANODOLLARS_PER_TOKEN
 NANODOLLARS_PER_DOLLAR = 1_000_000_000
@@ -246,7 +247,7 @@ class BudgetLedger:
                deadline: Optional[float] = None) -> None:
         if not isinstance(reservation, Reservation):
             raise BudgetError("Invalid budget reservation")
-        if token_count is not None and (type(token_count) is not int or token_count < 0 or token_count > 100_000_000):
+        if token_count is not None and (type(token_count) is not int or token_count < 0 or token_count > MAX_SETTLEMENT_TOKENS):
             raise BudgetError("Invalid provider token count; reservation remains held")
         connection = None
         try:

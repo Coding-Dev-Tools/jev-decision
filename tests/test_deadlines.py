@@ -92,9 +92,14 @@ def test_slow_injected_settlement_cannot_return_or_cache_success(tmp_path):
 
 
 @pytest.mark.parametrize("lock_at", ["reserve", "settle"])
-def test_sqlite_contention_bounds_client_and_keeps_holds(tmp_path, lock_at):
+def test_sqlite_contention_bounds_client_and_keeps_holds(tmp_path, monkeypatch, lock_at):
     config = RuntimeConfig(home=tmp_path, enabled=True)
     ledger = BudgetLedger(config)
+    if lock_at == "settle":
+        # Arrange the real committed hold before the short measured interval so
+        # slow fixture I/O cannot prevent reaching the intended settlement case.
+        reservation = ledger.reserve()
+        monkeypatch.setattr(ledger, "reserve", lambda **_kwargs: reservation)
     blocker = sqlite3.connect(str(config.ledger_path), isolation_level=None, check_same_thread=False)
     calls = []
     def transport(*_):

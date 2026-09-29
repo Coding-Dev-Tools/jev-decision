@@ -44,6 +44,7 @@ DEFAULT_TYPESAFE_ENDPOINT = "https://api.typesafe.ai/v1/systemone"
 DEFAULT_MODEL = "jev-1.13.0"
 MAX_QUESTIONS = 128
 MAX_INPUT_TOKENS = 64000
+MAX_SAFE_USAGE_INTEGER = 2**53 - 1  # Same exact integer range as the TypeScript client.
 PROBABILITY_TOLERANCE = 1e-3
 _PINNED_MODEL = re.compile(r"jev-[0-9]+\.[0-9]+\.[0-9]+\Z")
 TransportResult = Union[Tuple[int, bytes], Tuple[int, bytes, Mapping[str, str]]]
@@ -219,8 +220,8 @@ def _usage(payload: Dict[str, Any]) -> Dict[str, Optional[int]]:
         return result
     for name in result:
         value = usage.get(name)
-        if type(value) is int and value >= 0:
-            result[name] = value
+        if type(value) in (int, float) and 0 <= value <= MAX_SAFE_USAGE_INTEGER and value == int(value):
+            result[name] = int(value)
     return result
 
 
@@ -661,7 +662,7 @@ class JevClient:
             if remaining <= 0:
                 return finish("timeout")
             try:
-                from .budget import BudgetDeadlineExceeded, BudgetExceeded
+                from .budget import MAX_SETTLEMENT_TOKENS, BudgetDeadlineExceeded, BudgetExceeded
 
                 if self._ledger is None:
                     _accounting_call(self._initialize_ledger, deadline=deadline)
@@ -709,17 +710,26 @@ class JevClient:
                     error = "response_too_large"
                 else:
                     try:
-                        def parse_reply() -> Tuple[Dict[str, Decision], Dict[str, Optional[int]]]:
+                        def parse_reply() -> Tuple[Dict[str, Decision], Dict[str, Optional[int]], bool]:
                             payload = _decode(response_body)
-                            return validate_response(payload, checked, requested_model), _usage(payload)
-                        decisions, usage = _bounded_call(parse_reply, deadline)
+                            decisions = validate_response(payload, checked, requested_model)
+                            reported = payload.get("usage")
+                            count = reported.get("input_tokens") if isinstance(reported, dict) else None
+                            overrun = (type(count) is int or type(count) is float and count.is_integer()) and count > MAX_INPUT_TOKENS
+                            return decisions, _usage(payload), overrun
+                        decisions, usage, usage_overrun = _bounded_call(parse_reply, deadline)
                         resolved_model = requested_model
                         known_tokens = usage["input_tokens"]
-                        if known_tokens is not None and known_tokens > MAX_INPUT_TOKENS:
+                        if usage_overrun:
                             # Account for a provider overrun rather than hiding the cost.
                             # The anomalous answer remains unusable.
                             error = "invalid_response"
                             decisions = {}
+                            if known_tokens is not None and known_tokens > MAX_SETTLEMENT_TOKENS:
+                                # Keep the provider's anomalous usage in the result,
+                                # but retain an unknown hold instead of misreporting
+                                # an accounting failure for an unsupported count.
+                                known_tokens = None
                     except (ValueError, TypeError, KeyError, OverflowError, RecursionError) as exc:
                         error = "model_mismatch" if str(exc) == "model_mismatch" else "invalid_response"
             except _ResponseTooLarge:
