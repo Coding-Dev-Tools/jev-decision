@@ -1,4 +1,5 @@
 """Wire identifiers are redacted, collision-free and restored per invocation."""
+import copy
 import json
 import shutil
 import subprocess
@@ -52,6 +53,72 @@ def test_redacted_choice_labels_are_restored_for_current_caller_and_cache(typed)
     collision = {"route": {"type": "choice", "instructions": "Choose", "criteria": {"password=alpha": None, "password=beta": None}}}
     assert client.evaluate("sample", collision).error_code == "invalid_request"
     assert len(calls) == ledger.reservations == 1
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_redacted_score_legends_are_restored_for_current_caller_and_cache(typed):
+    calls, ledger = [], Ledger()
+    api_key = "fixture-api-key"
+
+    def transport(request, *_):
+        payload = json.loads(request.data)
+        calls.append(payload)
+        question_id, question = next(iter(payload["questions"].items()))
+        return 200, json.dumps({"model": payload["model"], "answers": {question_id: {
+            "type": "score", "score": .75, "confidence": .9,
+            "legend": {str(index): level for index, level in enumerate(question["criteria"])},
+            "probabilities": {"0": .25, "1": .75}}}}).encode()
+
+    client = JevClient(api_key=api_key, runtime=RuntimeConfig(enabled=True), budget_ledger=ledger, transport=transport)
+    for index, label in enumerate(("alpha", "beta", "gamma")):
+        question_id = "password=" + label
+        criteria = [
+            {"description": ["Low relevance", "password=" + label], "secret": label},
+            {"description": ["High relevance", api_key], "metadata": {"required": True, "count": 1}},
+        ]
+        original = copy.deepcopy(criteria)
+        questions = ([ScoreQuestion(question_id, "Rate relevance", criteria=criteria)] if typed else
+                     {question_id: {"type": "score", "instructions": "Rate relevance", "criteria": criteria}})
+        for attempt in range(2):
+            batch = client.evaluate("sample", questions)
+            assert batch.status == "ok" and batch.source == ("provider" if index == attempt == 0 else "cache")
+            decision = batch.get_score(question_id)
+            assert decision.id == question_id and decision.score == .75
+            assert decision.legend == {str(i): level for i, level in enumerate(original)}
+            assert batch.to_dict()["decisions"][question_id]["legend"] == decision.legend
+            # A result may be edited without mutating the input, cache or next caller.
+            decision.legend["0"]["description"].append("caller mutation")
+            assert criteria == original
+    assert len(calls) == ledger.reservations == 1
+    assert all(value not in json.dumps(calls) for value in (api_key, "alpha", "beta", "gamma"))
+
+
+@pytest.mark.parametrize("legend", [{"0": "Low password=alpha", "1": "High relevance"},
+                                    {"0": "Different rubric", "1": "High relevance"}])
+def test_score_legend_must_match_wire_before_restoring_original(legend):
+    ledger = Ledger()
+
+    def transport(request, *_):
+        payload = json.loads(request.data)
+        return 200, json.dumps({"model": payload["model"], "answers": {"q": {
+            "type": "score", "score": .75, "confidence": .9, "legend": legend,
+            "probabilities": {"0": .25, "1": .75}}}}).encode()
+
+    client = JevClient(api_key="fixture-api-key", runtime=RuntimeConfig(enabled=True), budget_ledger=ledger, transport=transport)
+    questions = [ScoreQuestion("q", "Rate relevance", criteria=["Low password=alpha", "High relevance"])]
+    for _ in range(2):
+        batch = client.evaluate("sample", questions)
+        assert batch.error_code == "invalid_response" and not batch.decisions
+    assert ledger.reservations == 2
+
+
+def test_score_levels_that_collide_after_redaction_are_rejected_before_transmission():
+    ledger = Ledger()
+    def forbidden(*_):
+        pytest.fail("Ambiguous redacted rubric was transmitted")
+    client = JevClient(api_key="fixture-api-key", runtime=RuntimeConfig(enabled=True), budget_ledger=ledger, transport=forbidden)
+    batch = client.evaluate("sample", [ScoreQuestion("q", "Rate relevance", criteria=["password=alpha", "password=beta"])])
+    assert batch.error_code == "invalid_request" and ledger.reservations == 0
 
 
 def run_case(spec, typed):

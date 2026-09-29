@@ -40,10 +40,10 @@ def local_status(client: Optional[JevClient] = None, *, config=None) -> Dict[str
 
 
 def selection_options(config, mode=None):
-    """Caller choices can only reduce the operator's saved selection permission."""
+    """Calls default off and cannot exceed the operator's saved permission."""
     ranks = {"off": 0, "shadow": 1, "select": 2}
     configured = getattr(config, "selection_mode", "off")
-    requested = configured if mode is None else mode
+    requested = "off" if mode is None else mode
     if not isinstance(configured, str) or configured not in ranks:
         raise ValueError("invalid_configured_selection_mode")
     if not isinstance(requested, str) or requested not in ranks:

@@ -8,6 +8,8 @@ This review covered the portable candidate from PR #1, starting at `27da47d`, wi
 | --- | --- | --- |
 | Score validation | Python accepted a displayed weighted score incompatible with the rounded probabilities' feasible unit-mass distribution | Python and TypeScript reject the same impossible four-level response; shared fixtures cover it |
 | Choice identity | Redacted labels escaped into caller results and could break routing | Python restores the current caller's labels and probability keys after validation, including cache aliases; collisions fail before transmission |
+| Score rubric identity | Redacted rubric values escaped into caller results | Python validates the wire legend, then restores the current caller's original nested rubric; cached wire values never substitute another caller's legend |
+| Evidence mode default | Omitting MCP mode inherited the saved mode despite advertising `off` | Both CLI and MCP default omitted modes to `off`, without unlocking credentials or loading profiles; scoring requires an explicit per-call mode |
 | Typed JSON | Python equated booleans with numeric rubric metadata and expected answers | Recursive comparison distinguishes booleans from numbers in legends and independent task grading |
 | Timing qualification | Reported total task time could be shorter than the tool's own measured latency | Qualification requires valid `selection_latency <= preprocessing <= total` for every arm |
 | Evidence retention | WARN, FATAL and CRITICAL records could receive low-relevance omission | Those severity records and neighboring context remain protected; the rubric hash changes |
@@ -24,7 +26,7 @@ The Command Code guide and packaged skills use this entry point. Generic advice 
 
 ## Validation and release gates
 
-Local Windows verification used Python 3.12.10 and Node 24.15.0: **520 Python tests passed, one symlink-privilege test skipped; 86 TypeScript tests passed**. Shared native fixtures run against both implementations. Full configured Ruff rules and Git whitespace checks passed. Focused client and evidence fixes received independent re-review with no remaining findings.
+Local Windows verification used Python 3.12.10 and Node 24.15.0: **529 Python tests passed, one symlink-privilege test skipped; 86 TypeScript tests passed**. Shared native fixtures run against both implementations. Full configured Ruff rules and Git whitespace checks passed. Focused client and evidence fixes received independent re-review with no remaining findings.
 
 The package checker builds wheel/source artifacts and installs each outside the checkout, then invokes packaged capture, Command Code skill installation/restoration, and legacy/current MCP subprocesses. The npm checker packs and installs outside the checkout. CI performs these checks on Windows, macOS and Linux and tests core Python 3.9–3.13; read the exact PR-head check results before release. Artifact creation does not publish a package or merge the PR.
 

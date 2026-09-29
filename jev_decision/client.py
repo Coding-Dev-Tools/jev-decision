@@ -589,14 +589,14 @@ class JevClient:
             return finish("invalid_request")
         if time.monotonic() >= deadline:
             return finish("timeout")
-        def prepare() -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Dict[str, str]], bytes]:
+        def prepare() -> Tuple[Dict[str, Any], Dict[str, str], Dict[str, Dict[str, str]], Dict[str, Any], bytes]:
             from .policy import sanitize_excerpt, sanitize_state
 
             validate_state(state)
             checked = normalize_questions(questions)
             # Sanitize all string-bearing request values, including instructions.
             clean_state = sanitize_state(state, secrets=(self._api_key,))
-            wire_questions, original_ids, original_choices = {}, {}, {}
+            wire_questions, original_ids, original_choices, original_legends = {}, {}, {}, {}
             for question_id, question in checked.items():
                 wire_id = sanitize_excerpt(question_id, secrets=(self._api_key,))
                 if wire_id in original_ids:
@@ -608,15 +608,19 @@ class JevClient:
                         sanitize_excerpt(label, secrets=(self._api_key,)): label
                         for label in question["criteria"]
                     }
+                elif question["type"] == "score":
+                    original_legends[wire_id] = {
+                        str(index): level for index, level in enumerate(question["criteria"])
+                    }
             checked = normalize_questions(wire_questions)
             validate_state(clean_state)
             body = json.dumps(
                 {"model": requested_model, "state": clean_state, "questions": checked},
                 ensure_ascii=False, allow_nan=False, separators=(",", ":"), sort_keys=True,
             ).encode("utf-8")
-            return checked, original_ids, original_choices, body
+            return checked, original_ids, original_choices, original_legends, body
         try:
-            checked, original_ids, original_choices, body = _bounded_call(prepare, deadline)
+            checked, original_ids, original_choices, original_legends, body = _bounded_call(prepare, deadline)
         except TimeoutError:
             return finish("timeout")
         except Exception:
@@ -634,6 +638,8 @@ class JevClient:
                     labels = original_choices[wire_id]
                     decision.selected = labels[decision.selected]
                     decision.probabilities = {labels[key]: value for key, value in decision.probabilities.items()}
+                elif isinstance(decision, ScoreDecision):
+                    decision.legend = copy.deepcopy(original_legends[wire_id])
             batch.decisions = {original_ids[key]: value for key, value in batch.decisions.items()}
             return batch
 
@@ -756,8 +762,8 @@ class JevClient:
                         self._cache.move_to_end(fingerprint)
                         while len(self._cache) > self._cache_size:
                             self._cache.popitem(last=False)
-                # Cache only wire IDs; each caller receives its own original IDs,
-                # even when different redacted identifiers share a payload.
+                # Cache only wire values; restore this caller's IDs, Choice labels
+                # and Score legends after validating the sanitized response.
                 return restore_ids()
             delay = max(random.uniform(0.05, 0.1), retry_after or 0.0)
             if not retryable or attempt or deadline - time.monotonic() <= delay:

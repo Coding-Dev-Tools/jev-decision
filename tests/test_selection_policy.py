@@ -22,11 +22,42 @@ def test_request_can_only_downgrade_saved_policy(tmp_path, monkeypatch, configur
     config = RuntimeConfig(home=tmp_path, selection_mode=configured,
                            qualified_profile_path=tmp_path / "retained-profile.json")
     modes = ["off", "shadow", "select"]
-    expected = modes[min(modes.index(configured), modes.index(requested or configured))]
+    expected = modes[min(modes.index(configured), modes.index(requested or "off"))]
     result = mcp.selection_options(config, requested)
     assert result["mode"] == expected
     assert bool(loaded) is (expected == "select")
     assert ("qualification" in result) is (expected == "select")
+
+
+@pytest.mark.parametrize("configured", ["shadow", "select"])
+def test_omitted_mode_is_off_for_mcp_and_cli(tmp_path, monkeypatch, capsys, configured):
+    config = RuntimeConfig(home=tmp_path / "state", enabled=True, selection_mode=configured,
+                           credential_source="keyring", workspace_roots=(tmp_path,),
+                           qualified_profile_path=tmp_path / "retained-profile.json")
+    config.save()
+    monkeypatch.setenv("JEV_HOME", str(config.home))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("An omitted mode must not acquire credentials or load a selection profile")
+
+    monkeypatch.setattr(mcp, "JevClient", forbidden)
+    monkeypatch.setattr(cli, "JevClient", forbidden)
+    monkeypatch.setattr(qualification, "load_qualification", forbidden)
+    evidence = tmp_path / "evidence.log"
+    evidence.write_bytes(("INFO ordinary evidence record\n" * 130).encode())
+    source = evidence.read_text()
+    server = mcp.MCPServer()
+    for tool, args, field in (
+        ("jev_read_evidence", {"path": str(evidence), "goal": "inspect"}, "output"),
+        ("jev_prune_output", {"raw_output": source, "current_goal": "inspect"}, "pruned_output"),
+    ):
+        result = server.call_tool(tool, args)
+        assert result[field] == source
+        assert result["stats"]["mode"] == "off" and result["stats"]["calls"] == 0
+    for command in ("evidence", "prune"):
+        assert cli.main([command, "--file", str(evidence), "--goal", "inspect", "--json"]) == 0
+        result = json.loads(capsys.readouterr().out)
+        assert result["stats"]["mode"] == "off" and result["stats"]["calls"] == 0
 
 
 @pytest.mark.parametrize("source", ["auto", "dpapi", "keyring"])

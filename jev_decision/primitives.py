@@ -180,8 +180,9 @@ class DecisionBatch:
     def to_dict(self) -> Dict[str, Any]:
         """Return decisions under caller IDs, excluding state and raw bodies.
 
-        IDs intentionally preserve caller input; callers should use non-sensitive
-        correlation labels even though recognizable secrets are redacted on wire.
+        IDs, Choice labels and Score legends intentionally preserve caller input;
+        use non-sensitive labels and rubrics even though recognizable secrets are
+        redacted on wire.
         """
         decisions = {}
         for question_id, decision in self.decisions.items():

@@ -56,6 +56,37 @@ def test_offline_call_is_explicit_not_certification():
     assert body['status'] == 'offline' and 'is_complete' not in body
 
 
+@pytest.mark.parametrize('configured', ['shadow', 'select'])
+def test_sdk_omitted_mode_matches_advertised_off_default(configured, tmp_path, monkeypatch):
+    Client = sdk()
+    from jev_decision import mcp, qualification
+    from jev_decision.runtime import RuntimeConfig
+
+    config = RuntimeConfig(home=tmp_path/'runtime', workspace_roots=(tmp_path,), enabled=True,
+                           selection_mode=configured, qualified_profile_path=tmp_path/'profile.json')
+    config.save()
+    monkeypatch.setenv('JEV_HOME', str(config.home))
+    def forbidden(*_args, **_kwargs):
+        pytest.fail('Omitted SDK mode acquired credentials or loaded a profile')
+    monkeypatch.setattr(mcp, 'JevClient', forbidden)
+    monkeypatch.setattr(qualification, 'load_qualification', forbidden)
+    evidence = tmp_path/'evidence.log'
+    source = 'INFO ordinary evidence record\n' * 130
+    evidence.write_bytes(source.encode())
+    async def check():
+        async with Client(create_sdk_server(MCPServer())) as client:
+            tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+            for name, args, field in (
+                ('jev_read_evidence', {'path':str(evidence), 'goal':'inspect'}, 'output'),
+                ('jev_prune_output', {'raw_output':source, 'current_goal':'inspect'}, 'pruned_output'),
+            ):
+                assert tools[name].input_schema['properties']['mode']['default'] == 'off'
+                result = (await client.call_tool(name, args)).structured_content
+                assert result[field] == source
+                assert result['stats']['mode'] == 'off' and result['stats']['calls'] == 0
+    asyncio.run(check())
+
+
 @pytest.mark.parametrize('mode', ['legacy', 'auto', '2026-07-28'])
 def test_real_sdk_stdio_client(mode, tmp_path):
     Client = sdk()
