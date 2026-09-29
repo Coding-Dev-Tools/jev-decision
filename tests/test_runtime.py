@@ -5,7 +5,6 @@ import os
 import sqlite3
 import subprocess
 import sys
-import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from datetime import datetime, timezone
@@ -336,17 +335,27 @@ print(accepted)
     assert ledger.status()["committed_usd"] == 0.02688
 
 
-def test_busy_ledger_fails_closed_quickly(isolated_runtime):
+def test_busy_ledger_fails_closed_with_bounded_sqlite_wait(isolated_runtime, monkeypatch):
     ledger = BudgetLedger(isolated_runtime)
+    connect = ledger._connect
+    busy_waits = []
+
+    def observe_connection(deadline=None):
+        opened = connect(deadline)
+        busy_waits.append(opened.execute("PRAGMA busy_timeout").fetchone()[0])
+        return opened
+
+    monkeypatch.setattr(ledger, "_connect", observe_connection)
     connection = sqlite3.connect(str(isolated_runtime.ledger_path), isolation_level=None)
     try:
         connection.execute("BEGIN IMMEDIATE")
-        started = time.monotonic()
         with pytest.raises(BudgetError):
             ledger.reserve()
-        assert time.monotonic() - started < 1.0
     finally:
         connection.close()
+    # A busy timeout bounds SQLite lock retries, not connection/filesystem work
+    # or scheduler delays. Absolute accounting/client deadlines are tested separately.
+    assert busy_waits and all(0 < milliseconds <= 200 for milliseconds in busy_waits)
     assert ledger.status()["attempts"] == 0
 
 

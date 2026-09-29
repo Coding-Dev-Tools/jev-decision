@@ -17,6 +17,7 @@ This review covered the portable candidate from PR #1, starting at `27da47d`, wi
 | Scope selection | Explicit user-scope commands inherited the saved project root | Only project scope inherits that root; explicit incompatible arguments still fail |
 | Target isolation | Unrelated client environment overrides blocked the selected installation | Only applicable target and scope locations are validated |
 | Setup guidance | Useful configuration failures became an opaque error; keyring guidance named a nonexistent extra | Allowlisted errors provide safe corrective hints; optional storage points to `jev-decision[setup]` |
+| Contention test | A standalone ledger call without an absolute deadline correctly rejected a reservation but exceeded an unsupported one-second test limit on macOS CI | The held-lock test verifies the actual SQLite busy timeout and zero reservations; explicit accounting and complete-client deadline tests remain unchanged |
 
 ## Less work for installed-package users
 
@@ -29,6 +30,8 @@ The Command Code guide and packaged skills use this entry point. Generic advice 
 Local Windows verification used Python 3.12.10 and Node 24.15.0: **529 Python tests passed, one symlink-privilege test skipped; 86 TypeScript tests passed**. Shared native fixtures run against both implementations. Full configured Ruff rules and Git whitespace checks passed. Focused client and evidence fixes received independent re-review with no remaining findings.
 
 The package checker builds wheel/source artifacts and installs each outside the checkout, then invokes packaged capture, Command Code skill installation/restoration, and legacy/current MCP subprocesses. The npm checker packs and installs outside the checkout. CI performs these checks on Windows, macOS and Linux and tests core Python 3.9–3.13; read the exact PR-head check results before release. Artifact creation does not publish a package or merge the PR.
+
+The first CI attempt at `09cbde8` recorded a 1.17-second standalone ledger rejection against the former one-second assertion; the failed job passed on one diagnostic rerun. SQLite's [busy timeout](https://www.sqlite.org/c3ref/busy_timeout.html) controls accumulated lock-retry sleeping; it is not a wall-clock deadline for connection setup and filesystem work. The revised test checks the actual connection setting (positive and no more than 200 ms), a real held lock, and zero reservations. Production timeouts were not loosened. The precise cause of the extra elapsed time was not established.
 
 The refreshed offline report still has four synthetic source tasks and 16 matched arm records. It remains ineligible with `live_evaluation_required`. Old profiles are invalidated by the changed protection policy's rubric hash.
 
