@@ -195,6 +195,9 @@ test("only the exact official origin and path are accepted", () => {
   ]) assert.throws(() => new JevClient({ baseUrl: endpoint }), /Only the official/);
   assert.throws(() => new JevClient({ timeoutMs: 5001 }), /between 1 and 5000/);
   assert.throws(() => new JevClient({ apiKey: "secret\nHeader: injection" }), error => !error.message.includes("secret"));
+  for (const placeholder of ["${TYPESAFE_API_KEY}", "${TYPESAFE_API_KEY:-}", "${env:TYPESAFE_API_KEY}", "{env:TYPESAFE_API_KEY}", "$TYPESAFE_API_KEY", "%TYPESAFE_API_KEY%"]) {
+    assert.throws(() => new JevClient({ apiKey: placeholder }), TypeError);
+  }
 });
 
 const badRequests = [

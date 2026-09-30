@@ -12,7 +12,7 @@ from .harness_guards import guard_bash_command, prune_tool_output, verify_turn_c
 from .mcp import MCPServer, local_status, parse_questions, selection_options
 
 _LOCAL_ERRORS = {
-    "API key must be a printable ASCII token of 1-4096 characters, excluding mock/offline": ("invalid_credential_format", "Use the provider key with visible ASCII characters and no internal spaces; mock/offline are not credentials. No key was saved."),
+    "API key must be a printable ASCII token of 1-4096 characters, excluding mock/offline": ("invalid_credential_format", "Use the provider key with visible ASCII characters and no internal spaces; mock/offline and unexpanded ${NAME} references are not credentials. No key was saved."),
     "Unknown timezone; install timezone data or use UTC": ("invalid_timezone", "Install jev-decision[setup] for timezone data, or use --timezone UTC."),
     "Install jev-decision[setup] or choose an environment reference": ("credential_backend_missing", "Install jev-decision[setup], or choose --credential-source env."),
     "OS credential storage is unavailable; choose an environment reference": ("credential_backend_unavailable", "Unlock the OS credential store, or choose --credential-source env."),

@@ -467,7 +467,10 @@ export class JevClient implements JevEvaluator {
     if (options.baseUrl !== undefined && options.baseUrl !== DEFAULT_TYPESAFE_ENDPOINT) throw new TypeError("Only the official TypeSafe System One endpoint is supported.");
     this.#timeoutMs = options.timeoutMs ?? MAX_DEADLINE_MS;
     if (!Number.isInteger(this.#timeoutMs) || this.#timeoutMs < 1 || this.#timeoutMs > MAX_DEADLINE_MS) throw new RangeError("timeoutMs must be an integer between 1 and 5000.");
-    if (options.apiKey !== undefined && (typeof options.apiKey !== "string" || !/^[\x21-\x7e]{1,512}$/.test(options.apiKey))) throw new TypeError("Invalid API credential format.");
+    // Unexpanded ${NAME}/{env:NAME}/$NAME/%NAME% references (passed through by some
+    // harness configurations when the variable is unset) are never credentials.
+    if (options.apiKey !== undefined && (typeof options.apiKey !== "string" || !/^[\x21-\x7e]{1,512}$/.test(options.apiKey)
+      || /^(?:\$\{[^{}]*\}|\{env:[^{}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%)$/.test(options.apiKey))) throw new TypeError("Invalid API credential format.");
     this.#apiKey = options.apiKey;
     this.#offlineMode = options.offlineMode ?? false;
     this.#fetch = options.fetchImpl ?? globalThis.fetch;

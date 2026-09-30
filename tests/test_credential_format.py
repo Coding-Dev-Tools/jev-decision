@@ -19,9 +19,12 @@ INVALID_KEYS = [
     pytest.param("OfFlInE", id="reserved-offline"),
     pytest.param("x" * 4097, id="too-long"),
 ]
+# An unexpanded reference is refused for storage; from the environment it is
+# treated as an absent variable (see the placeholder test below).
+STORE_INVALID_KEYS = INVALID_KEYS + [pytest.param("${TYPESAFE_API_KEY}", id="unexpanded-placeholder")]
 
 
-@pytest.mark.parametrize("key", INVALID_KEYS)
+@pytest.mark.parametrize("key", STORE_INVALID_KEYS)
 @pytest.mark.parametrize("source", ["dpapi", "keyring"])
 def test_invalid_key_is_rejected_before_storage(tmp_path, monkeypatch, key, source):
     config = RuntimeConfig(home=tmp_path / "runtime", credential_source=source)
@@ -73,3 +76,24 @@ def test_interactive_invalid_key_has_safe_actionable_cli_error(tmp_path, monkeyp
     result = json.loads(capsys.readouterr().out)
     assert result["error_code"] == "invalid_credential_format" and "ASCII" in result["hint"]
     assert "synthetic" not in json.dumps(result) and "credential_saved" not in result
+
+
+PLACEHOLDERS = ["${TYPESAFE_API_KEY}", "${TYPESAFE_API_KEY:-}", "${env:TYPESAFE_API_KEY}",
+                "{env:TYPESAFE_API_KEY}", "$TYPESAFE_API_KEY", "%TYPESAFE_API_KEY%"]
+
+
+@pytest.mark.parametrize("placeholder", PLACEHOLDERS)
+@pytest.mark.parametrize("source", ["env", "auto"])
+def test_unexpanded_harness_reference_is_an_absent_credential(tmp_path, monkeypatch, placeholder, source):
+    # Some clients pass an unset ${NAME} reference through literally. It must
+    # neither authenticate nor consume a budget reservation as if it were a key.
+    config = RuntimeConfig(home=tmp_path, credential_source=source, enabled=True)
+    monkeypatch.setenv("TYPESAFE_API_KEY", placeholder)
+    assert credentials.load_api_key(config) is None
+    status = credentials.credential_status(config)
+    assert status["environment_present"] is False and status["presence_status"] == "missing"
+    client = JevClient(runtime=config, transport=lambda *_: pytest.fail("Placeholder reached provider"))
+    result = client.evaluate("sample", {"q": {"type": "noul", "instructions": "Is this relevant?"}})
+    assert result.error_code == "missing_key" and result.attempts == 0
+    assert not config.ledger_path.exists()
+    assert not JevClient(api_key=placeholder, runtime=config).is_configured
