@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "jev-decision"
-version = "0.3.0"
+dynamic = ["version"]
 description = "Budgeted advisory Jev decisions, protected credentials, evidence selection and multi-harness MCP integration"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -35,6 +35,9 @@ setup = ["keyring>=25,<26", "tzdata>=2024.1"]
 
 [tool.setuptools.packages.find]
 include = ["jev_decision*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "jev_decision._version.__version__" }
 
 [tool.setuptools.package-data]
 jev_decision = ["resources/*.md"]

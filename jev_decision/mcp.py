@@ -7,13 +7,14 @@ import sys
 import threading
 from typing import Any, Dict, Optional
 
+from ._version import __version__
 from .client import JevClient, _decode, normalize_questions, validate_state
 from .harness_guards import guard_bash_command, prune_tool_output, verify_turn_completion
 from .primitives import ChoiceQuestion, NoulQuestion, ScoreQuestion
 from .schemas import TOOLS_MANIFEST
 
 SERVER_NAME = "jev-decision"
-SERVER_VERSION = "0.3.0"
+SERVER_VERSION = __version__
 MAX_MESSAGE_BYTES = 256 * 1024
 INSTRUCTIONS = ("Use Jev selectively for bounded semantic advice. Routine tasks need no Jev call. "
                 "Permissions and executed verification remain authoritative. Read saved evidence before "

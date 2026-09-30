@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -9,6 +10,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+VERSION = re.search(r'__version__ = "([^"]+)"', (ROOT / "jev_decision/_version.py").read_text(encoding="utf-8")).group(1)
 CORE_SMOKE = '''import json, os, subprocess, sys
 from pathlib import Path
 from jev_decision.harnesses import run_harness_command
@@ -84,7 +86,8 @@ def main():
         run([sys.executable, "-m", "venv", environment])
         python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         run([python, "-m", "pip", "install", "--no-cache-dir", artifact])
-        run([python, "-I", "-c", "import sys, jev_decision, jev_decision.cli; assert jev_decision.__version__ == '0.3.0'; assert 'mcp' not in sys.modules"])
+        run([python, "-I", "-c", "import sys, jev_decision, jev_decision.cli; assert jev_decision.__version__ == " + repr(VERSION)
+            + "; assert 'mcp' not in sys.modules"])
         run([python, "-I", "-m", "jev_decision.cli", "doctor", "--json"])
         core_script = outside / (label + "_core.py")
         core_script.write_text(CORE_SMOKE, encoding="utf-8")
@@ -93,7 +96,7 @@ def main():
         script = outside / (label + "_mcp.py")
         script.write_text(SMOKE, encoding="utf-8")
         run([python, "-I", script, env["JEV_HOME"]])
-    (output / "verification.json").write_text(json.dumps({"version": "0.3.0", "platform": sys.platform,
+    (output / "verification.json").write_text(json.dumps({"version": VERSION, "platform": sys.platform,
         "python": sys.version.split()[0], "wheel": wheel.name, "source": source.name,
         "clean_installs": ["wheel", "sdist"], "protocols": ["legacy", "2026-07-28"],
         "packaged_skills": ["jev-skill.md", "command-code-skill.md"],

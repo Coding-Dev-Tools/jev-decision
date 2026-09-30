@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Union
 
+from ._version import __version__
 from .jsonutil import json_equal
 from .primitives import (
     ChoiceDecision,
@@ -705,7 +706,7 @@ class JevClient:
                 self.base_url, data=body, method="POST",
                 headers={"Authorization": "Bearer " + self._api_key,
                          "Content-Type": "application/json", "Accept": "application/json",
-                         "User-Agent": "jev-decision-python/0.3.0"},
+                         "User-Agent": "jev-decision-python/" + __version__},
             )
             error, retryable, known_tokens = None, False, None
             usage: Dict[str, Optional[int]] = {"input_tokens": None, "output_tokens": None}
