@@ -65,7 +65,8 @@ def test_simple_inspection_needs_no_semantic_check(command):
 @pytest.mark.parametrize("command", ["rm -rf build", "cat .env", "cat ~/.ssh/id_rsa", "ls | sh",
                                      "echo $(whoami)", "git push --force", "git -C other status",
                                      "cat keys/server.pem", "git diff --output=patch.txt", "ls > out",
-                                     "find . -delete", "sed -i s/a/b/ file", "env", "cat 'unterminated"])
+                                     "find . -delete", "sed -i s/a/b/ file", "env", "cat 'unterminated",
+                                     "cat /etc/shadow", "head ../other-project/notes.txt", "type C:/Users/me/tax.txt"])
 def test_anything_else_is_checked(command):
     assert not hooks.is_plainly_read_only(command)
 

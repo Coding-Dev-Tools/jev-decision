@@ -80,8 +80,10 @@ def extract_command(harness: str, payload: Any) -> Tuple[str, str]:
 def is_plainly_read_only(command: str) -> bool:
     """Conservatively recognize simple inspection commands that need no check.
 
-    Any shell syntax (pipes, chaining, substitution, redirection, globbing) or an
-    argument naming a credential/private file disqualifies the command.
+    Any shell syntax (pipes, chaining, substitution, redirection, globbing), an
+    argument naming a credential/private file, or a path outside the working
+    directory (absolute, drive-qualified or climbing with ``..``) disqualifies
+    the command, because reading private data is itself a sensitive effect.
     """
     if _SHELL_SYNTAX.search(command):
         return False
@@ -93,8 +95,13 @@ def is_plainly_read_only(command: str) -> bool:
         return False
     from .evidence_file import _denied
 
-    if any(_denied(Path(word).parts) for word in words[1:] if not word.startswith("-")):
-        return False
+    for word in words[1:]:
+        if word.startswith("-"):
+            continue
+        parts = Path(word).parts
+        if (_denied(parts) or ".." in parts or word.startswith(("/", "\\"))
+                or re.match(r"[A-Za-z]:", word) or Path(word).is_absolute()):
+            return False
     program = Path(words[0]).name.lower()
     if program == "git":
         subcommand = next((word for word in words[1:] if not word.startswith("-")), None)

@@ -7,7 +7,7 @@ Coding agents run many shell commands, and a few of them delete data, rewrite sh
 For each shell command the harness is about to run, `jev hook run HARNESS`:
 
 1. Reads the hook payload on stdin and extracts the command and working directory.
-2. Skips simple read-only commands (`ls`, `cat README.md`, `git status`, `git log`, `grep`, ...). A command is skipped only when it has no shell syntax (pipes, `;`, `&&`, redirects, substitution, globs) and no argument that names a credential or private file.
+2. Skips simple read-only commands (`ls`, `cat README.md`, `git status`, `git log`, `grep`, ...). A command is skipped only when it has no shell syntax (pipes, `;`, `&&`, redirects, substitution, globs), no argument that names a credential or private file, and no path outside the working directory (absolute, drive-qualified, or climbing with `..`).
 3. Otherwise asks Jev two questions in one request: a Choice over `inspection` / `test_or_build` / `mutation` / `destructive_or_sensitive` / `unclear`, each with an explicit meaning, and a Noul for material risk. That is about 100 input tokens, or roughly $0.000004 per command.
 4. Flags the command when either probability of destructive or sensitive effects reaches the threshold (default `0.8`).
 
