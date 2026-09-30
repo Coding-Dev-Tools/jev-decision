@@ -103,6 +103,23 @@ def _description(value: Any) -> bool:
     return False
 
 
+_TYPED_FIELDS = frozenset({"id", "type", "prompt", "instructions", "options", "scale", "criteria"})
+
+
+def _typed_question(item: Dict[str, Any]) -> Any:
+    """Plain ``{"id", "type", "instructions", ...}`` objects, as in MCP/CLI and TypeScript."""
+    if not set(item) <= _TYPED_FIELDS or not isinstance(item.get("id"), str):
+        raise ValueError("invalid_question")
+    kind, prompt = item.get("type"), item.get("instructions", item.get("prompt"))
+    if kind == "noul":
+        return NoulQuestion(item["id"], prompt, criteria=item.get("criteria"))
+    if kind == "choice":
+        return ChoiceQuestion(item["id"], prompt, options=item.get("options"), criteria=item.get("criteria"))
+    if kind == "score":
+        return ScoreQuestion(item["id"], prompt, scale=item.get("scale"), criteria=item.get("criteria"))
+    raise ValueError("invalid_question_type")
+
+
 def normalize_questions(questions: Any) -> Dict[str, Any]:
     """Return native questions; invalid caller data raises a content-free ValueError."""
     try:
@@ -111,6 +128,8 @@ def normalize_questions(questions: Any) -> Dict[str, Any]:
         elif isinstance(questions, (list, tuple)):
             native = {}
             for question in questions:
+                if isinstance(question, dict):
+                    question = _typed_question(question)
                 if not isinstance(question, (NoulQuestion, ChoiceQuestion, ScoreQuestion)):
                     raise ValueError("invalid_question")
                 if not _text(question.id) or question.id in native:

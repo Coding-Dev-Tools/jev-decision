@@ -571,3 +571,21 @@ def test_saved_or_harness_runtime_is_not_upgraded_by_a_library_key(monkeypatch):
         assert client.evaluate("sample", {"q": {"type": "noul", "instructions": "Is it?"}}).error_code == "runtime_disabled"
     monkeypatch.setenv("TYPESAFE_API_KEY", "${TYPESAFE_API_KEY}")
     assert not JevClient().is_configured
+
+
+def test_plain_question_objects_match_the_mcp_and_typescript_form():
+    plain = [{"id": "intent", "type": "choice", "instructions": "Classify the change.",
+              "criteria": {"feature": "Adds behavior", "bug": "Fixes behavior", "unclear": None}},
+             {"id": "legacy", "type": "score", "prompt": "How relevant?", "scale": ["Unrelated", "Related"]},
+             NoulQuestion("typed", "Is this a sample?")]
+    assert normalize_questions(plain) == {
+        "intent": {"type": "choice", "instructions": "Classify the change.",
+                   "criteria": {"feature": "Adds behavior", "bug": "Fixes behavior", "unclear": None}},
+        "legacy": {"type": "score", "instructions": "How relevant?", "criteria": ["Unrelated", "Related"]},
+        "typed": {"type": "noul", "instructions": "Is this a sample?"}}
+    for bad in ([{"id": "x", "type": "noul", "instructions": "Q?", "unexpected": 1}],
+                [{"id": "x", "type": "unknown", "instructions": "Q?"}],
+                [{"type": "noul", "instructions": "Q?"}],
+                [{"id": "x", "type": "noul", "instructions": "Q?"}, {"id": "x", "type": "noul", "instructions": "R?"}]):
+        with pytest.raises(ValueError):
+            normalize_questions(bad)
