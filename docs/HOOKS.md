@@ -42,7 +42,7 @@ Claude Code (`~/.claude/settings.json` or `.claude/settings.json`) uses exec for
   "hooks": {
     "PreToolUse": [
       {
-        "matcher": "Bash",
+        "matcher": "Bash|PowerShell",
         "hooks": [
           {
             "type": "command",

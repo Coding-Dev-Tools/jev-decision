@@ -45,6 +45,8 @@ def test_payloads_are_normalized_for_every_harness():
     assert hooks.extract_command("command-code", PAYLOADS["command-code"]) == ("rm -rf 'build dir/'", "/repo/pkg")
     assert hooks.extract_command("codex", PAYLOADS["codex"]) == ("bash -lc 'rm -rf build/'", "/repo")
     assert hooks.extract_command("cursor", PAYLOADS["cursor"]) == ("rm -rf build/", "/repo")
+    windows = dict(PAYLOADS["claude-code"], tool_name="PowerShell", tool_input={"command": "Remove-Item -Recurse build"})
+    assert hooks.extract_command("claude-code", windows) == ("Remove-Item -Recurse build", "/repo")
     assert hooks.extract_command("gemini-cli", PAYLOADS["gemini-cli"]) == ("rm -rf build/", "/repo")
     for harness, payload in (("claude-code", {"tool_name": "Edit", "tool_input": {"file_path": "x"}}),
                              ("codex", {"tool_name": "apply_patch", "tool_input": {"command": "x"}}),
@@ -144,7 +146,7 @@ def test_config_fragments_bind_the_runtime_and_never_approve(harness, capsys):
     assert result["decision"] in ("ask", "deny") and "allow" not in text
     if harness == "claude-code":
         entry = result["fragment"]["hooks"]["PreToolUse"][0]
-        assert entry["matcher"] == "Bash" and entry["hooks"][0]["args"][-3:] == ["hook", "run", "claude-code"]
+        assert entry["matcher"] == "Bash|PowerShell" and entry["hooks"][0]["args"][-3:] == ["hook", "run", "claude-code"]
     if harness == "command-code":
         assert result["fragment"]["hooks"]["PreToolUse"][0]["matcher"] == "^shell$"
 

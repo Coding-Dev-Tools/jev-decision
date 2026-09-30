@@ -32,7 +32,7 @@ MAX_HOOK_INPUT_BYTES = 256 * 1024
 # permission_mode values meaning no person will approve the command first.
 UNATTENDED_MODES = frozenset({"bypass", "bypasspermissions", "dont-ask", "dontask", "yolo"})
 _SHELL_TOOLS = {
-    "claude-code": {"Bash"},
+    "claude-code": {"Bash", "PowerShell"},
     "codex": {"Bash"},
     "command-code": {"shell_command"},
     "gemini-cli": {"run_shell_command"},
@@ -190,7 +190,7 @@ def hook_config(harness: str, *, runtime_home: Path, python: Optional[str] = Non
         argv += ["--when", when]
     shell = " ".join([_quote(python)] + [_quote(item) if item == str(runtime_home) else item for item in argv])
     if harness == "claude-code":
-        fragment = {"hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [
+        fragment = {"hooks": {"PreToolUse": [{"matcher": "Bash|PowerShell", "hooks": [
             {"type": "command", "command": python, "args": argv, "timeout": 10}]}]}}
         files = ["~/.claude/settings.json", "<project>/.claude/settings.json"]
     elif harness == "command-code":
