@@ -13,6 +13,16 @@ This release intentionally changes unsafe or misleading result contracts. Update
 
 No benchmark grade, permission boundary, completion claim or memory mutation should be based solely on a Jev assessment. The TypeScript guard now awaits the supplied client; it no longer silently uses a fallback path.
 
+## Review changes before merge (2026-09-30)
+
+- Generated harness entries on macOS/Linux now reference the virtual environment's own interpreter instead of the resolved base Python. Re-run `jev harness install --target NAME --apply` for any entry created by an earlier 0.3 build. The installer reports it as an update.
+- `JevClient(api_key=...)`, or `JevClient()` with `TYPESAFE_API_KEY`/`JEV_API_KEY` set, works before `jev setup` and opts in with the default daily cap. A saved configuration, including a disabled one, still wins. The CLI and MCP server stay offline until setup.
+- Python accepts plain `{id, type, instructions, criteria}` question objects, as MCP, the CLI and TypeScript already did.
+- `guard_bash_command` asks with explicit category and risk criteria and returns `category_probabilities`.
+- New `jev hook run|config` for escalate-only pre-execution shell guarding ([HOOKS.md](HOOKS.md)).
+- Unexpanded environment placeholders are absent credentials. Claude Code entries use `${NAME:-}`.
+- Evidence reads screen credential and private names below the approved workspace root rather than across the root's own ancestors.
+
 ## Portable runtime v2 and evidence API changes
 
 New installations load offline until `jev setup` records an explicit choice. Setup offers DPAPI, optional OS keyring, or an environment reference; UTC is the new portable timezone default. Budgets are operator-selected finite nonnegative amounts, with zero disabling requests. Core/CLI installation supports Python 3.9; install the optional `mcp` extra on Python 3.10+ for the official SDK v2 adapter.

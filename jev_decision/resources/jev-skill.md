@@ -30,4 +30,6 @@ For classification or routing, ask which descriptive category fits one input. Fo
 
 Keep arithmetic, counts, date comparisons and cross-question consistency rules in code. Prefer one direct question pointing to named state fields; unrelated state and indirect wording reduce reliability. Do not reuse a Noul threshold for a Choice question. See the provider's [Jev 1.13 guidance](https://docs.typesafe.ai/model-jaggedness/jev-1.13).
 
+If a Jev guard hook asks for confirmation or blocks a shell command, report what was flagged and let the user decide; never rephrase, split or obfuscate the command to get past it.
+
 If Jev is unavailable, the budget is exhausted, or an answer is uncertain, continue normal reasoning and deterministic checks. Do not loop retries, bypass the shared runtime, increase the budget, switch providers, or treat a score as permission or proof. Retain contradictory evidence and validate consequential conclusions with the original source or executable tests.
