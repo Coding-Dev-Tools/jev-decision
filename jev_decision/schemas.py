@@ -63,6 +63,35 @@ QUESTIONS["examples"] = [[
 ]]
 STATE = {**DESCRIPTION, "description": "Prefer a JSON object with relevant facts/excerpts; do not encode an object as a string.",
          "examples": [{"excerpt": "FAILED: one authentication check", "goal": "Find the failed check"}]}
+
+# Tool schemas are sent to the primary model on every request by most MCP
+# clients. The advertised jev_decide schema is therefore the compact preferred
+# form (~70% smaller); the server still validates against the complete schema
+# above, which also accepts native ID-keyed maps and legacy prompt/options/scale.
+_COMPACT_TEXT = {"type": ["string", "object", "array"], "minLength": 1, "minProperties": 1, "minItems": 1}
+
+
+def _compact_question(kind, criteria, criteria_required):
+    properties = {"id": {"type": "string", "minLength": 1, "maxLength": 200}, "type": {"const": kind},
+                  "instructions": _COMPACT_TEXT, "criteria": criteria}
+    return {"type": "object", "properties": properties, "additionalProperties": False,
+            "required": ["id", "type", "instructions"] + (["criteria"] if criteria_required else [])}
+
+
+COMPACT_QUESTIONS = {
+    "type": "array", "minItems": 1, "maxItems": 128,
+    "items": {"anyOf": [
+        _compact_question("noul", {"type": "object", "minProperties": 1, "additionalProperties": False,
+                                   "properties": {"true": _COMPACT_TEXT, "false": _COMPACT_TEXT}}, False),
+        _compact_question("choice", {"type": "object", "minProperties": 2, "maxProperties": 255,
+                                     "additionalProperties": {"type": ["string", "object", "array", "null"]}}, True),
+        _compact_question("score", {"type": "array", "minItems": 2, "maxItems": 10, "items": _COMPACT_TEXT}, True),
+    ]},
+    "description": "Array of questions with unique id. choice criteria map each label to its meaning; "
+                   "score criteria list 2-10 ordered level descriptions. Never encode JSON as a string.",
+    "examples": QUESTIONS["examples"],
+}
+COMPACT_STATE = {**_COMPACT_TEXT, "description": STATE["description"], "examples": STATE["examples"]}
 USAGE = {"type": "object", "properties": {
     "input_tokens": {"type": ["integer", "null"], "minimum": 0},
     "output_tokens": {"type": ["integer", "null"], "minimum": 0}},
@@ -147,7 +176,7 @@ def _tool(name, description, properties, required, output):
                             "idempotentHint": False, "openWorldHint": name != "jev_status"}}
 
 
-TOOLS_MANIFEST = [
+FULL_TOOLS_MANIFEST = [
     _tool("jev_status", "Inspect local configuration and budget. Does not authenticate or contact the provider.", {}, [],
           STATUS_OUTPUT),
     _tool("jev_decide", "Ask bounded descriptive Noul, Choice or Score questions. Advice cannot grant permission or certify execution.",
@@ -174,4 +203,12 @@ TOOLS_MANIFEST = [
            "max_bytes": {"type": "integer", "minimum": 1, "maximum": 65536, "default": 65536},
            "expected_source_sha256": HASH, "max_retained_lines": {"type": "integer", "minimum": 1, "default": 100}},
           ["path", "goal"], EVIDENCE_OUTPUT),
+]
+
+# Server-side validation uses the complete schemas; discovery advertises compact ones.
+INPUT_VALIDATION_SCHEMAS = {tool["name"]: tool["inputSchema"] for tool in FULL_TOOLS_MANIFEST}
+TOOLS_MANIFEST = [
+    dict(tool, inputSchema={**tool["inputSchema"], "properties": {"state": COMPACT_STATE, "questions": COMPACT_QUESTIONS}})
+    if tool["name"] == "jev_decide" else tool
+    for tool in FULL_TOOLS_MANIFEST
 ]

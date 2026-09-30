@@ -11,7 +11,7 @@ from ._version import __version__
 from .client import JevClient, _decode, normalize_questions, validate_state
 from .harness_guards import guard_bash_command, prune_tool_output, verify_turn_completion
 from .primitives import ChoiceQuestion, NoulQuestion, ScoreQuestion
-from .schemas import TOOLS_MANIFEST
+from .schemas import INPUT_VALIDATION_SCHEMAS, TOOLS_MANIFEST
 
 SERVER_NAME = "jev-decision"
 SERVER_VERSION = __version__
@@ -166,7 +166,7 @@ def create_sdk_server(service=None):
         raise RuntimeError("MCP requires Python 3.10+ and pip install 'jev-decision[mcp]'") from None
     service = service or MCPServer()
     tools = {tool["name"]: tool for tool in TOOLS_MANIFEST}
-    validators = {name: Draft202012Validator(tool["inputSchema"]) for name, tool in tools.items()}
+    validators = {name: Draft202012Validator(INPUT_VALIDATION_SCHEMAS[name]) for name in tools}
 
     async def list_tools(context, params):
         return types.ListToolsResult(tools=[types.Tool(**tool) for tool in TOOLS_MANIFEST])

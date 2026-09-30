@@ -142,3 +142,21 @@ def test_cli_explains_how_to_enable_a_fresh_installation(capsys):
     assert main(["guard", "git status"]) == 2
     result = json.loads(capsys.readouterr().out)
     assert result["error_code"] == "runtime_disabled" and "jev setup" in result["hint"]
+
+
+@pytest.mark.parametrize('questions', [
+    {'x': {'type': 'noul', 'instructions': 'Is this a sample?'}},
+    [{'id': 'x', 'type': 'choice', 'prompt': 'Which kind?', 'options': ['a', 'b']}],
+    [{'id': 'x', 'type': 'score', 'instructions': 'How relevant?', 'scale': ['Unrelated', 'Related']}],
+])
+def test_compact_advertised_schema_still_accepts_every_supported_form(questions):
+    # Discovery advertises the compact array form to save model context; the
+    # server keeps validating native maps and legacy fields with the full schema.
+    Client = sdk()
+    async def check():
+        async with Client(create_sdk_server(MCPServer(JevClient(offline_mode=True)))) as client:
+            result = await client.call_tool('jev_decide', {'state': 'sample', 'questions': questions})
+            assert result.structured_content['error_code'] == 'offline'
+            tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+            assert len(json.dumps(tools['jev_decide'].input_schema)) < 3000
+    asyncio.run(check())
