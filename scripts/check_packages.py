@@ -27,6 +27,12 @@ assert manifest['streams']['stdout']['bytes'] > 0 and manifest['streams']['stder
 config = RuntimeConfig(home=root / 'state', daily_budget_usd=0, credential_source='env')
 options = dict(target='command-code', scope='project', project_root=root, config=config)
 assert run_harness_command('install', apply=True, **options)['status'] == 'ok'
+# The generated launcher must be the environment's own interpreter: a resolved
+# POSIX venv symlink would point at a base Python without this package.
+entry = json.loads((root / '.mcp.json').read_text(encoding='utf-8'))['mcpServers']['jev']
+probe = subprocess.run([entry['command'], '-I', '-c', 'import jev_decision.mcp'],
+    capture_output=True, timeout=60)
+assert probe.returncode == 0, probe.stderr[-400:]
 text = (root / '.commandcode/skills/jev-advice/SKILL.md').read_text(encoding='utf-8')
 assert 'disable-model-invocation: true' in text and '{{' not in text
 assert run_harness_command('restore', apply=True, **options)['status'] == 'ok'

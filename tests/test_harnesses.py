@@ -127,7 +127,7 @@ def test_native_schemas_and_skill_fallbacks_preserve_existing_settings(profiles)
     result = harnesses.run_harness_command("install", apply=True)
     assert result["status"] == "ok"
     assert all(row["status"] == "installed" for row in result["items"])
-    python = str(Path(sys.executable).resolve())
+    python = harnesses.launcher_python()
     environment = {"JEV_HOME": str(RuntimeConfig.load().home)}
     command = _json(home / ".commandcode/mcp.json")["mcpServers"]["jev"]
     assert command == {"transport": "stdio", "enabled": True, "command": python, "args": ["-I", "-m", "jev_decision.mcp"], "env": environment}
@@ -421,7 +421,7 @@ def test_gemini_native_mcp_preserves_settings(profiles):
 @pytest.mark.parametrize("scope", ["user", "project"])
 @pytest.mark.parametrize("target,user_path,project_path,reference", [
     ("gemini-cli", ".gemini/settings.json", ".gemini/settings.json", "${TEST_JEV_KEY}"),
-    ("claude-code", ".claude.json", ".mcp.json", "${TEST_JEV_KEY}"),
+    ("claude-code", ".claude.json", ".mcp.json", "${TEST_JEV_KEY:-}"),
     ("cursor", ".cursor/mcp.json", ".cursor/mcp.json", "${env:TEST_JEV_KEY}"),
 ])
 def test_explicit_environment_reference_never_embeds_secret(profiles, monkeypatch, tmp_path, scope,
@@ -499,3 +499,30 @@ def test_invalid_selected_targets_do_not_write(profiles, options, error):
     with pytest.raises(harnesses.HarnessError, match=error):
         harnesses.run_harness_command("install", apply=True, **options)
     assert not RuntimeConfig.load().home.exists()
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX virtual environments expose symlinked interpreters")
+def test_generated_entries_keep_the_virtual_environment_interpreter(profiles, tmp_path, monkeypatch):
+    # venv/pipx/uv interpreters are symlinks to a base Python without this
+    # package. Resolving them would launch an interpreter that cannot import it.
+    environment = tmp_path / "isolated venv" / "bin"
+    environment.mkdir(parents=True)
+    launcher = environment / "python"
+    launcher.symlink_to(Path(sys.executable).resolve())
+    monkeypatch.setattr(sys, "executable", str(launcher))
+    assert harnesses.launcher_python() == str(launcher)
+    result = harnesses.run_harness_command("install", target="cursor", apply=True)
+    assert result["status"] == "ok"
+    assert _json(profiles[0] / ".cursor/mcp.json")["mcpServers"]["jev"]["command"] == str(launcher)
+    skill = (profiles[0] / ".cursor/skills/jev-advice/SKILL.md").read_text()
+    assert str(launcher) in skill and str(Path(sys.executable).resolve()) not in skill.replace(str(launcher), "")
+
+
+def test_claude_code_environment_reference_has_an_empty_default(profiles, monkeypatch):
+    # Claude Code passes an unset ${NAME} through literally; the default keeps
+    # an absent key absent instead of turning the placeholder into a credential.
+    config = replace(RuntimeConfig.load(), credential_source="env", key_env="TYPESAFE_API_KEY")
+    monkeypatch.setattr(RuntimeConfig, "load", classmethod(lambda cls: config))
+    assert harnesses.run_harness_command("install", target="claude-code", apply=True)["status"] == "ok"
+    entry = _json(profiles[0] / ".claude.json")["mcpServers"]["jev"]
+    assert entry["env"]["TYPESAFE_API_KEY"] == "${TYPESAFE_API_KEY:-}"
