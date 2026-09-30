@@ -155,6 +155,7 @@ TOOLS_MANIFEST = [
     _tool("jev_guard_command", "Assess command effects as advice; never execute or authorize a command.",
           {"command": TEXT, "cwd": {"type": "string"}}, ["command"],
           {"type": "object", "properties": {**METADATA, "risk_category": TEXT,
+           "category_probabilities": {"type": ["object", "null"], "additionalProperties": PROBABILITY},
            "risk_probability": NULLABLE_NUMBER, "permission_authority": {"const": "native_harness"}}}),
     _tool("jev_verify_completion", "Assess gaps in supplied verification evidence; never certify task completion.",
           {"goal": TEXT, "recent_actions": {"type": "string"}, "last_output": {"type": "string"}},

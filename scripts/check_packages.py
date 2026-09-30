@@ -32,7 +32,7 @@ assert run_harness_command('install', apply=True, **options)['status'] == 'ok'
 # The generated launcher must be the environment's own interpreter: a resolved
 # POSIX venv symlink would point at a base Python without this package.
 entry = json.loads((root / '.mcp.json').read_text(encoding='utf-8'))['mcpServers']['jev']
-probe = subprocess.run([entry['command'], '-I', '-c', 'import jev_decision.mcp'],
+probe = subprocess.run([entry['command'], '-I', '-c', 'import jev_decision.mcp, jev_decision.hooks'],
     capture_output=True, timeout=60)
 assert probe.returncode == 0, probe.stderr[-400:]
 text = (root / '.commandcode/skills/jev-advice/SKILL.md').read_text(encoding='utf-8')

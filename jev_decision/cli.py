@@ -52,7 +52,50 @@ def _input(path):
         raise ValueError("input_limit")
     return value
 
+def _hook_run(argv):
+    """`jev [--runtime-home DIR] hook run HARNESS`: never block the harness on our own failure.
+
+    Exit code 2 means "block" to several harnesses, so every local problem,
+    including argument errors from a stale snippet, exits 0 with no decision.
+    """
+    from .hooks import HOOK_HARNESSES, run_hook
+
+    class QuietParser(argparse.ArgumentParser):
+        def error(self, message):
+            raise ValueError("invalid_hook_arguments")
+
+    parser = QuietParser(prog="jev hook run", add_help=False)
+    parser.add_argument("--runtime-home")
+    parser.add_argument("hook")
+    parser.add_argument("action")
+    parser.add_argument("harness", choices=HOOK_HARNESSES)
+    parser.add_argument("--threshold", type=float)
+    parser.add_argument("--when", choices=["unattended", "always"], default="unattended")
+    try:
+        args, _ = parser.parse_known_args(argv)
+        if args.runtime_home:
+            home = Path(args.runtime_home).expanduser()
+            if not home.is_absolute():
+                return 0
+            os.environ["JEV_HOME"] = str(home.resolve())
+        stream = getattr(sys.stdin, "buffer", None)
+        raw = stream.read(262145) if stream is not None else sys.stdin.read(262145).encode("utf-8")
+        output = run_hook(args.harness, raw, threshold=args.threshold, when=args.when)
+    except (SystemExit, Exception):
+        return 0
+    if output:
+        sys.stdout.write(output + "\n")
+    return 0
+
+
+def _is_hook_run(argv):
+    return "hook" in argv and argv[argv.index("hook") + 1:argv.index("hook") + 2] == ["run"]
+
+
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if _is_hook_run(argv):
+        return _hook_run(argv)
     parser = argparse.ArgumentParser(prog="jev", description="Managed Jev advisory decisions")
     parser.add_argument("--runtime-home", help="Absolute shared state directory for this invocation")
     commands = parser.add_subparsers(dest="subcommand", required=True)
@@ -117,6 +160,14 @@ def main(argv=None):
     harness.add_argument("--dry-run", action="store_true")
     harness.add_argument("--json", action="store_true")
     commands.add_parser("mcp", help="Run the stdio server")
+    from .hooks import HOOK_HARNESSES
+    hook = commands.add_parser("hook", help="Escalate-only pre-execution shell guard for harness hooks")
+    hook.add_argument("action", choices=["run", "config"],
+                      help="run: read one hook payload on stdin; config: print the settings fragment to merge")
+    hook.add_argument("harness", choices=HOOK_HARNESSES)
+    hook.add_argument("--threshold", type=float)
+    hook.add_argument("--when", choices=["unattended", "always"], default="unattended",
+                      help="Deny-only harnesses: act only in no-prompt sessions (default) or always")
     args = parser.parse_args(argv)
     try:
         if args.subcommand == "capture":
@@ -139,6 +190,10 @@ def main(argv=None):
             return 0 if result.get("status") == "ok" else 2
         if args.subcommand == "mcp":
             MCPServer().run_stdio()
+            return 0
+        if args.subcommand == "hook":
+            from .hooks import hook_config
+            _print(hook_config(args.harness, runtime_home=config.home, when=args.when))
             return 0
         if args.subcommand == "auth":
             from .credentials import credential_status, set_api_key_interactive
