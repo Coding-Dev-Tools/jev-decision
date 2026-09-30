@@ -33,6 +33,16 @@ _SETUP_HINT = ("Fresh installations make no provider calls. Run `jev setup` to c
                "and daily budget, then retry.")
 
 
+def _disabled_hint(config, result):
+    if not isinstance(result, dict) or result.get("error_code") != "runtime_disabled":
+        return None
+    if not config.setup_complete:
+        return _SETUP_HINT
+    if config.daily_budget_usd == 0:
+        return "The saved daily budget is 0, which disables provider calls. Run `jev setup --non-interactive --daily-budget 1` (or another cap)."
+    return None
+
+
 def _print(value):
     print(json.dumps(value, indent=2, allow_nan=False))
 
@@ -228,6 +238,9 @@ def main(argv=None):
                     {"message": "The sample log reports a failed unit test."},
                     {"failure_present": {"type": "noul", "instructions": "Does the sample message report a failed unit test?"}}).to_dict()
                 result["authenticated"] = result["live_result"]["status"] == "ok" and result["live_result"]["source"] == "provider"
+                hint = _disabled_hint(config, result["live_result"])
+                if hint:
+                    result["hint"] = hint
                 result["authentication_status"] = "verified" if result["authenticated"] else "failed"
                 from .budget import BudgetLedger
                 try:
@@ -274,8 +287,9 @@ def main(argv=None):
                     sys.stderr.write(json.dumps(stats, allow_nan=False) + "\n")
                 return 0
             result = {"output": output, "stats": stats}
-        if result.get("error_code") == "runtime_disabled" and not config.setup_complete:
-            result = {**result, "hint": _SETUP_HINT}
+        hint = _disabled_hint(config, result)
+        if hint:
+            result = {**result, "hint": hint}
         _print(result)
         return 2 if result.get("status") == "unavailable" else 0
     except (ValueError, OSError, UnicodeError, RuntimeError) as error:

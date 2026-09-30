@@ -160,3 +160,14 @@ def test_compact_advertised_schema_still_accepts_every_supported_form(questions)
             tools = {tool.name: tool for tool in (await client.list_tools()).tools}
             assert len(json.dumps(tools['jev_decide'].input_schema)) < 3000
     asyncio.run(check())
+
+
+def test_cli_explains_a_zero_budget(capsys, tmp_path, monkeypatch):
+    from jev_decision.cli import main
+    from jev_decision.runtime import RuntimeConfig
+    RuntimeConfig(home=RuntimeConfig.load().home, daily_budget_usd=0).save()
+    assert main(["decide", "--file", str(Path(__file__).resolve().parents[1] / "examples/route.json")]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["error_code"] == "runtime_disabled" and "--daily-budget" in result["hint"]
+    assert main(["doctor", "--live", "--json"]) == 2
+    assert "--daily-budget" in json.loads(capsys.readouterr().out)["hint"]
