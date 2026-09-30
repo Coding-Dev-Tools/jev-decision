@@ -24,6 +24,7 @@ import urllib.error
 import urllib.request
 import uuid
 from collections import OrderedDict
+from dataclasses import replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Union
@@ -466,6 +467,25 @@ def _http_error(status: int) -> Tuple[str, bool]:
     return "provider_error", status in (500, 502, 503, 504, 529)
 
 
+def _library_opt_in(config: Any, api_key: Optional[str]) -> bool:
+    """Whether direct library construction before any ``jev setup`` has opted in.
+
+    Supplying a key (argument, ``TYPESAFE_API_KEY`` or ``JEV_API_KEY``) to a
+    library client is an explicit choice to call the provider; the default
+    daily budget and shared ledger still apply. Harness processes (CLI, MCP)
+    pass their saved runtime explicitly and stay offline until setup, and a
+    saved configuration (including a disabled one) is always respected.
+    """
+    from .credentials import _is_placeholder
+
+    if getattr(config, "setup_complete", True) or config.config_path.exists():
+        return False
+    if api_key is not None:
+        return bool(api_key)
+    return any(os.environ.get(name, "").strip() and not _is_placeholder(os.environ[name])
+               for name in ("TYPESAFE_API_KEY", "JEV_API_KEY"))
+
+
 class JevClient:
     """Shared-policy client. Provider failures preserve the normal LLM workflow."""
 
@@ -505,6 +525,8 @@ class JevClient:
             from .runtime import RuntimeConfig
 
             self._runtime = runtime or RuntimeConfig.load()
+            if runtime is None and _library_opt_in(self._runtime, api_key):
+                self._runtime = replace(self._runtime, enabled=True)
             if not isinstance(self._runtime, RuntimeConfig):
                 raise ValueError("invalid_runtime_config")
             self.model = model or self._runtime.model

@@ -29,6 +29,10 @@ _LOCAL_ERRORS = {
 }
 
 
+_SETUP_HINT = ("Fresh installations make no provider calls. Run `jev setup` to choose a credential source "
+               "and daily budget, then retry.")
+
+
 def _print(value):
     print(json.dumps(value, indent=2, allow_nan=False))
 
@@ -215,6 +219,8 @@ def main(argv=None):
                     sys.stderr.write(json.dumps(stats, allow_nan=False) + "\n")
                 return 0
             result = {"output": output, "stats": stats}
+        if result.get("error_code") == "runtime_disabled" and not config.setup_complete:
+            result = {**result, "hint": _SETUP_HINT}
         _print(result)
         return 2 if result.get("status") == "unavailable" else 0
     except (ValueError, OSError, UnicodeError, RuntimeError) as error:

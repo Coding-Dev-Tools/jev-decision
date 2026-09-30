@@ -135,3 +135,10 @@ def test_cli_invalid_input_is_content_free():
         input='secret-sensitive-invalid-json', text=True, capture_output=True, timeout=10)
     assert completed.returncode == 2
     assert 'secret-sensitive' not in completed.stdout + completed.stderr
+
+
+def test_cli_explains_how_to_enable_a_fresh_installation(capsys):
+    from jev_decision.cli import main
+    assert main(["guard", "git status"]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["error_code"] == "runtime_disabled" and "jev setup" in result["hint"]
