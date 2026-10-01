@@ -71,6 +71,7 @@ METADATA = {
     "status": {"type": "string"}, "source": {"type": ["string", "null"]},
     "requested_model": NULLABLE_TEXT, "resolved_model": NULLABLE_TEXT, "usage": USAGE,
     "latency_ms": NULLABLE_NUMBER, "attempts": {"type": ["integer", "null"], "minimum": 0},
+    "request_id": NULLABLE_TEXT, "is_fallback": {"type": ["boolean", "null"]},
     "error_code": NULLABLE_TEXT, "advisory_only": {"type": "boolean"},
 }
 DECISION_PROPERTIES = {

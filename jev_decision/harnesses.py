@@ -405,7 +405,7 @@ def _discover(target=None, scope="user", project_root=None, runtime=None):
     if runtime.credential_source == "env":
         # Empty fallback keeps off-mode evidence reads available without a key.
         command_stdio["env"][runtime.key_env] = "${" + runtime.key_env + ":-}"
-    add("command-code", root, ["cmdc", "commandcode"], root / "mcp.json", value=command_stdio,
+    add("command-code", root, ["command-code", "cmdc", "commandcode"] + ([] if os.name == "nt" else ["cmd"]), root / "mcp.json", value=command_stdio,
         skill_root=root / "skills", executable=local / "Programs" / "Command Code" / "Command Code.exe",
         skill_template="command-code-skill.md")
     gemini = home / ".gemini"

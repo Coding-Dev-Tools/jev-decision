@@ -16,16 +16,16 @@ class PolicyError(ValueError):
 _SECRET_FIELD = re.compile(
     r"(?i)^(?:[a-z][a-z0-9]*[_-])*(?:typesafe_api_key|jev_api_key|api[_-]?key|api[_-]?token|secret|"
     r"password|passwd|authorization|access[_-]?token|refresh[_-]?token|client[_-]?secret|"
-    r"private[_-]?key|aws_secret_access_key)$"
+    r"private[_-]?key|aws_secret_access_key|_authToken|_auth)$"
 )
 _ASSIGNMENT = re.compile(
     r'''(?i)(["']?(?:typesafe_api_key|jev_api_key|api[_-]?key|api[_-]?token|secret|'''
     r'''password|passwd|authorization|access[_-]?token|refresh[_-]?token|client[_-]?secret|'''
-    r'''private[_-]?key|aws_secret_access_key)["']?\s*[:=]\s*)'''
-    r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|[^\s,;}\]]+)'''
+    r'''private[_-]?key|aws_secret_access_key|_authToken|_auth)["']?\s*[:=]\s*)'''
+    r'''(?:"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\[REDACTED\]|[^\s,;}\]]+)'''
 )
 _PEM = re.compile(r"-----BEGIN (?:[A-Z0-9 ]*PRIVATE KEY)-----.*?-----END (?:[A-Z0-9 ]*PRIVATE KEY)-----", re.S)
-_TOKEN = re.compile(r"\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,})\b")
+_TOKEN = re.compile(r"\b(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,}|npm_[A-Za-z0-9]{12,}|apikey_[A-Za-z0-9_-]{16,})\b")
 _BEARER = re.compile(r"(?i)\bBearer\s+[A-Za-z0-9._~+/=-]+")
 _URL_USERINFO = re.compile(r"(?i)(https?://)[^\s/@]+:[^\s/@]+@")
 _JWT = re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b")

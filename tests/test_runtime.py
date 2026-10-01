@@ -60,6 +60,8 @@ def test_public_config_atomic_roundtrip(isolated_runtime, tmp_path):
     {"daily_budget_usd": "0.0000000001"}, {"workspace_roots": ["relative"]},
     {"enabled": "false"}, {"pruning_enabled": 1}, {"timezone": "Missing/Timezone"},
     {"credential_source": "plaintext"}, {"key_env": "KEY=secret"}, {"setup_complete": 1},
+    {"key_env": "JEV_HOME"}, {"key_env": "jev_home"},
+    {"key_env": "JEV_ENDPOINT_URL"}, {"key_env": "JEV_OFFLINE_MODE"},
     {"selection_mode": "select"}, {"selection_mode": "anything"}, {"qualified_profile_path": "relative"},
     {"max_request_bytes": 24577}, {"max_response_bytes": 262145}, {"timeout_s": float("nan")},
 ])
@@ -357,6 +359,15 @@ def test_busy_ledger_fails_closed_with_bounded_sqlite_wait(isolated_runtime, mon
     # or scheduler delays. Absolute accounting/client deadlines are tested separately.
     assert busy_waits and all(0 < milliseconds <= 200 for milliseconds in busy_waits)
     assert ledger.status()["attempts"] == 0
+
+
+def test_package_registry_and_typesafe_redaction():
+    text = '//registry.npmjs.org/:_authToken=npm_synthetic123456789\n' \
+        '_auth=opaque-registry-canary\napikey_synthetic1234567890123456'
+    clean = policy.sanitize(text)
+    assert "synthetic" not in clean and "opaque-registry-canary" not in clean
+    clean_state = policy.sanitize_state({"_authToken": "opaque-value", "_auth": "opaque-value"})
+    assert "opaque-value" not in json.dumps(clean_state)
 
 
 def test_invalid_and_conflicting_usage_remains_conservative(isolated_runtime):

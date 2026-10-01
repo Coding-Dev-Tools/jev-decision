@@ -114,6 +114,8 @@ class RuntimeConfig:
             raise RuntimeConfigError("Unsupported credential source")
         if not isinstance(self.key_env, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", self.key_env):
             raise RuntimeConfigError("Invalid credential environment variable name")
+        if self.key_env.upper() in {"JEV_HOME", "JEV_ENDPOINT_URL", "JEV_OFFLINE_MODE"}:
+            raise RuntimeConfigError("Credential environment variable conflicts with Jev runtime settings")
         if not isinstance(self.selection_mode, str) or self.selection_mode not in {"off", "shadow", "select"}:
             raise RuntimeConfigError("Unsupported evidence selection mode")
         for name in ("qualified_profile_path", "project_root"):
@@ -195,7 +197,14 @@ class RuntimeConfig:
             # A hand-written/incomplete v2 file is not an implicit opt-in.
             data.setdefault("enabled", False)
             data.setdefault("setup_complete", False)
-        return cls(home=home, **data)
+        config = cls(home=home, **data)
+        # Setup persists canonical approval paths. Loading must not follow a
+        # newly substituted junction/symlink and grant its target fresh access.
+        stored_roots = tuple(dict.fromkeys(Path(value).expanduser() for value in data.get("workspace_roots", ())))
+        from .evidence_file import _parts
+        if tuple(map(_parts, config.workspace_roots)) != tuple(map(_parts, stored_roots)):
+            raise RuntimeConfigError("Configured workspace root changed; review workspace setup")
+        return config
 
     def _public_config(self) -> Dict[str, Any]:
         return {

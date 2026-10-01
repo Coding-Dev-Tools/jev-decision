@@ -16,6 +16,21 @@ from jev_decision import credentials, harnesses
 from jev_decision.runtime import RuntimeConfig
 
 
+@pytest.mark.parametrize("executable", ["command-code", "cmdc", "commandcode"])
+def test_documented_command_code_executables_are_detected(command_code_profile, monkeypatch, executable):
+    _, _, config = command_code_profile
+    monkeypatch.setattr(harnesses.shutil, "which", lambda name: "/fixture/client" if name == executable else None)
+    _, clients = harnesses._discover("command-code", runtime=config)
+    assert clients[0]["runnable_detected"] is True
+
+
+def test_windows_command_shell_is_not_detected_as_command_code(command_code_profile, monkeypatch):
+    _, _, config = command_code_profile
+    monkeypatch.setattr(harnesses.shutil, "which", lambda name: "/fixture/cmd" if name == "cmd" else None)
+    _, clients = harnesses._discover("command-code", runtime=config)
+    assert clients[0]["runnable_detected"] is (os.name != "nt")
+
+
 @pytest.fixture
 def command_code_profile(tmp_path, monkeypatch):
     home = tmp_path / "user home"

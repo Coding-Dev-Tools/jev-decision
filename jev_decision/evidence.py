@@ -33,12 +33,19 @@ def read_evidence_file(path: str, goal: str, roots: Iterable[str], *, client: Op
             or re.fullmatch(r"[0-9a-f]{64}", expected_source_sha256) is None):
         raise ValueError("invalid_expected_source_sha256")
     resolved, data = read_evidence_bytes(path, roots, max_bytes=MAX_FILE_BYTES)
-    if len(data) > MAX_FILE_BYTES or b"\x00" in data:
+    if len(data) > MAX_FILE_BYTES:
         raise ValueError("evidence_file_limit_or_binary")
     source_hash = hashlib.sha256(data).hexdigest()
     if expected_source_sha256 is not None and source_hash != expected_source_sha256:
         raise ValueError("source_hash_mismatch")
-    raw = data.decode("utf-8-sig", errors="strict")
+    if data.startswith((b"\xff\xfe", b"\xfe\xff", b"\x00\x00\xfe\xff")):
+        raise ValueError("evidence_encoding_not_utf8")
+    if b"\x00" in data:
+        raise ValueError("evidence_file_limit_or_binary")
+    try:
+        raw = data.decode("utf-8-sig", errors="strict")
+    except UnicodeError:
+        raise ValueError("evidence_encoding_not_utf8") from None
     safe = sanitize_evidence(raw)
     lines = safe.splitlines(keepends=True)
     if start_line > len(lines) + 1:

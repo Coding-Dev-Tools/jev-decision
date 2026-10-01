@@ -33,3 +33,10 @@ The [comprehensive release review](release-review-20260928.md) records the four 
 Reproduction and actual campaign observation contracts are in [EVALUATION.md](../EVALUATION.md). Report bytes include full tool envelopes, omission markers and metadata; bytes are not substituted for tokens. A repeated run can change response hashes because local artifact paths and runtime timing metadata differ; original source and label hashes remain the reproducibility anchors.
 
 No named desktop/CLI harness version is promoted to live verified by these tests. The earlier Command Code pilot is preserved as an integration check. Paid qualification, OS vault usability and real client/provider invocations remain deployment-specific work. No universal token or latency savings claim is supported, and no automatic omission profile ships.
+
+## Command Code and memory integration
+
+The [2026-10-01 local review](command-code-memory-20261001.md) records structured
+memory advice, the optional Engraphis question bridge, Command Code usability
+repairs and clean package verification. It remains separate from live client
+invocation, workload benefit, remote CI and publication.

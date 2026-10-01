@@ -10,6 +10,33 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows batch launch behavior")
+@pytest.mark.parametrize("extension", [".cmd", ".bat"])
+@pytest.mark.parametrize("entry", ["cli", "module"])
+def test_windows_batch_producers_rejected_before_capture(tmp_path, monkeypatch, capsys, extension, entry):
+    from jev_decision import capture
+    from jev_decision.cli import main
+    batch = tmp_path / ("producer" + extension)
+    batch.write_text("@echo private-output", encoding="utf-8")
+    monkeypatch.setattr(capture.shutil, "which", lambda _name: str(batch))
+    monkeypatch.setattr(capture.subprocess, "run", lambda *_args, **_kwargs: pytest.fail("batch producer launched"))
+    target = tmp_path / "captured"
+    invoke = main if entry == "cli" else capture.main
+    assert invoke((["capture"] if entry == "cli" else []) + ["--directory", str(target), "--", "producer"]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["error_code"] == "batch_producer_requires_explicit_interpreter"
+    assert "node.exe" in result["hint"] and "private-output" not in json.dumps(result)
+    assert not target.exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows batch launch behavior")
+def test_windows_explicit_batch_path_is_rejected_without_path_resolution(tmp_path, monkeypatch):
+    from jev_decision import capture
+    monkeypatch.setattr(capture.shutil, "which", lambda _name: None)
+    with pytest.raises(ValueError, match="batch_producer_requires_explicit_interpreter"):
+        capture.capture_output(tmp_path / "capture", [str(tmp_path / "producer.CMD")])
+
+
 @pytest.mark.parametrize("entry", ["example", "cli", "module"])
 def test_capture_preserves_binary_streams_exit_status_and_originals(tmp_path, entry):
     target = tmp_path / "evidence"

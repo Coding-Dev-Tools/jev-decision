@@ -41,6 +41,19 @@ test("shared question-ID redaction and collision corpus", async () => {
   await require("./question-id-runner.cjs").runCorpus();
 });
 
+test("canonical memory recipe converts to the TypeScript native map", async () => {
+  const request = require("../../examples/memory-advice.json");
+  const native = Object.fromEntries(request.questions.map(({ id, ...question }) => [id, question]));
+  assert.deepEqual(normalizeQuestions(native), native);
+  assert.deepEqual(Object.keys(native), ["relation", "memory_type", "relevance", "verification_gap"]);
+  let calls = 0;
+  const client = new JevClient({ offlineMode: true, fetchImpl: async () => { calls++; throw new Error("unexpected provider call"); } });
+  const result = await client.evaluate(request.state, native);
+  assert.equal(result.status, "offline");
+  assert.deepEqual(result.decisions, {});
+  assert.equal(calls, 0);
+});
+
 test("wire-ID cache and concurrent aliases retain each caller's original IDs", async () => {
   let calls = 0;
   let release;

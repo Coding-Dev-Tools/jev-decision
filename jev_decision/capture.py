@@ -6,6 +6,8 @@ involved. The caller authorizes the producer under its ordinary permissions.
 import argparse
 import hashlib
 import json
+import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -28,6 +30,12 @@ def capture_output(directory, command):
     command = command[1:] if command[:1] == ["--"] else command
     if not command or not Path(directory).is_absolute():
         raise ValueError("absolute_new_directory_and_producer_required")
+    if os.name == "nt":
+        executable = shutil.which(command[0]) or command[0]
+        if Path(executable).suffix.lower() in {".cmd", ".bat"}:
+            raise ValueError("batch_producer_requires_explicit_interpreter")
+        # Bind the executable we inspected instead of repeating Windows lookup.
+        command = [executable, *command[1:]]
     directory = Path(directory).resolve()
     directory.mkdir(parents=True, exist_ok=False)
     stdout, stderr = directory / "stdout.log", directory / "stderr.log"
@@ -59,8 +67,12 @@ def main(argv=None):
     args = parser.parse_args(argv)
     try:
         return capture_output(args.directory, args.command)
-    except (ValueError, OSError):
-        print(json.dumps({"status": "unavailable", "error_code": "capture_input_or_filesystem_error"}))
+    except (ValueError, OSError) as error:
+        result = {"status": "unavailable", "error_code": "capture_input_or_filesystem_error"}
+        if str(error) == "batch_producer_requires_explicit_interpreter":
+            result.update(error_code="batch_producer_requires_explicit_interpreter",
+                hint="Call the underlying executable directly, such as node.exe with the package's JavaScript entry point. A batch file requires an explicitly authorized command interpreter.")
+        print(json.dumps(result))
         return 2
 
 

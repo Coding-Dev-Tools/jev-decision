@@ -10,6 +10,28 @@ from jev_decision.client import JevClient
 from jev_decision.runtime import RuntimeConfig
 
 
+def test_setup_rejects_credential_variable_runtime_collision(capsys, tmp_path):
+    assert cli.main(["--runtime-home", str(tmp_path / "state"), "setup", "--non-interactive",
+        "--credential-source", "env", "--key-env", "JEV_HOME", "--daily-budget", "0"]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["error_code"] == "credential_variable_conflict"
+    assert "TYPESAFE_API_KEY" in result["hint"] and not (tmp_path / "state" / "config.json").exists()
+
+
+@pytest.mark.parametrize("data", [b"private-caf\xe9", "private-fact".encode("utf-16"), "private-fact".encode("utf-32")])
+def test_evidence_encoding_failure_is_actionable_and_preserves_original(tmp_path, capsys, data):
+    config = RuntimeConfig(home=tmp_path / "state", workspace_roots=(tmp_path,), daily_budget_usd=0)
+    config.save()
+    artifact = tmp_path / "producer.log"
+    artifact.write_bytes(data)
+    assert cli.main(["--runtime-home", str(config.home), "evidence", "--file", str(artifact),
+                     "--goal", "Read saved evidence", "--mode", "off", "--json"]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["error_code"] == "evidence_encoding_not_utf8" and "UTF-8" in result["hint"]
+    assert "private-fact" not in json.dumps(result) and artifact.read_bytes() == data
+    assert not config.ledger_path.exists()
+
+
 def test_setup_timezone_error_has_actionable_content_free_hint(capsys):
     assert cli.main(["setup", "--non-interactive", "--credential-source", "env",
                      "--daily-budget", "0", "--timezone", "Definitely/InvalidPrivateZone"]) == 2

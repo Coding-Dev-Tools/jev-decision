@@ -7,6 +7,7 @@ import pytest
 
 from jev_decision import evidence_file
 from jev_decision.evidence import read_evidence_file
+from jev_decision.runtime import RuntimeConfig, RuntimeConfigError
 
 
 def _directory_link(link, target):
@@ -41,6 +42,55 @@ class NoProvider:
     def evaluate(self, *_args, **_kwargs):
         self.calls.append(1)
         raise AssertionError("A rejected file must not reach scoring")
+
+
+@pytest.mark.parametrize("name", [".npmrc", ".pypirc", ".netrc", "_netrc", ".git-credentials",
+                                 "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "vault.dpapi",
+                                 "vault.jks", ".kube/config", ".docker/config.json"])
+def test_sensitive_file_names_never_read_or_reach_scoring(tmp_path, monkeypatch, name):
+    path = tmp_path / name
+    path.parent.mkdir(parents=True, exist_ok=True)
+    original = b"synthetic-private-canary\n"
+    path.write_bytes(original)
+    reads = _no_reads(monkeypatch)
+    client = NoProvider()
+    with pytest.raises(ValueError, match="credential_or_private_file_denied"):
+        read_evidence_file(str(path), "inspect", [tmp_path], mode="shadow", client=client)
+    assert reads == [] and client.calls == [] and path.read_bytes() == original
+
+
+def test_platform_name_aliases_do_not_bypass_private_file_filters(tmp_path, monkeypatch):
+    reads = _no_reads(monkeypatch)
+    if os.name == "nt":
+        for name in (".npmrc. ", ".NETRC ", "id_rsa.", ".kube./config", "build.log:hidden"):
+            with pytest.raises(ValueError, match="credential_or_private_file_denied"):
+                read_evidence_file(str(tmp_path / name), "inspect", [tmp_path])
+        assert reads == []
+    else:
+        # Colons are ordinary filename characters on POSIX, not NTFS streams.
+        path = tmp_path / "build:log"
+        path.write_bytes(b"INFO ordinary evidence\n")
+        result = read_evidence_file(str(path), "inspect", [tmp_path])
+        assert result["output"] == "INFO ordinary evidence\n" and reads
+
+
+def test_replaced_approved_root_never_grants_access_on_read_or_reload(tmp_path, monkeypatch):
+    approved, outside = tmp_path / "approved", tmp_path / "outside"
+    approved.mkdir()
+    outside.mkdir()
+    config = RuntimeConfig(home=RuntimeConfig.load().home, workspace_roots=(approved,))
+    config.save()
+    (outside / "build.log").write_bytes(b"INFO synthetic outside evidence\n" * 150)
+    approved.rename(tmp_path / "parked")
+    _directory_link(approved, outside)
+    reads = _no_reads(monkeypatch)
+    client = NoProvider()
+    with pytest.raises(ValueError, match="outside_approved_workspace"):
+        read_evidence_file(str(approved / "build.log"), "inspect", config.workspace_roots,
+                           mode="shadow", client=client)
+    with pytest.raises(RuntimeConfigError, match="workspace root changed"):
+        RuntimeConfig.load()
+    assert reads == [] and client.calls == [] and config.workspace_roots == (approved,)
 
 
 @pytest.mark.parametrize("reverse", [False, True])

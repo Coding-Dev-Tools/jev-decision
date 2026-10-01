@@ -236,6 +236,43 @@ def test_file_evidence_redacts_and_preserves_source(tmp_path):
     assert result["redacted"]
     assert path.read_bytes() == original
 
+def test_file_evidence_redacts_registry_tokens_before_scoring(tmp_path):
+    original = ("//registry.npmjs.org/:_authToken=npm_synthetic123456789\r\n"
+                "INFO _auth=opaque-registry-canary\r\n"
+                "INFO apikey_synthetic1234567890123456\r\n" + log_text(150))
+    path = tmp_path / "build.log"
+    path.write_bytes(original.encode("utf-8"))
+    client = Scorer()
+    result = read_evidence_file(str(path), "inspect", [str(tmp_path)], mode="shadow",
+                                source_class="application_log", client=client)
+    assert result["output"].splitlines()[:3] == [
+        '//registry.npmjs.org/:_authToken="[REDACTED]"',
+        'INFO _auth="[REDACTED]"', 'INFO [REDACTED]']
+    assert result["output"].count("\r\n") == 3 and client.calls
+    assert path.read_bytes() == original.encode("utf-8")
+    for value in ("npm_synthetic", "opaque-registry-canary", "apikey_synthetic"):
+        assert value not in result["output"] and value not in str(client.calls)
+
+
+@pytest.mark.parametrize("changes", [{"error_code": "timeout"}, {"is_fallback": True},
+                                    {"requested_model": "jev-stale"}, {"source": "heuristic"}])
+@pytest.mark.parametrize("mode", ["shadow", "select"])
+def test_failed_injected_scores_never_allow_evidence_omission(tmp_path, changes, mode):
+    from dataclasses import replace
+    class StaleScorer(Scorer):
+        def evaluate(self, *args, **kwargs):
+            return replace(super().evaluate(*args, **kwargs), **changes)
+    raw = log_text(150)
+    evidence = saved_evidence(tmp_path, raw)
+    options = {}
+    if mode == "select":
+        profile, report = qualified_documents()
+        options.update(qualification=profile, qualification_report=report, expected_workload=WORKLOAD)
+    output, stats = prune_tool_output(raw, "inspect", client=StaleScorer(), mode=mode,
+        source_class="application_log", source_ref=evidence["source_ref"], **options)
+    assert output == raw and not stats["pruned"] and stats["calls"] > 0
+    assert not any(span.get("assessed") for span in stats["spans"])
+
 def test_file_evidence_denies_secrets_and_escape(tmp_path):
     for name in [".env", "credentials.json", "private.key"]:
         path = tmp_path / name

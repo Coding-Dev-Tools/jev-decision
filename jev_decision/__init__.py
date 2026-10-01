@@ -8,6 +8,7 @@ from .harness_guards import (
     prune_tool_output,
     verify_turn_completion,
 )
+from .memory import assess_memory_relation, assess_memory_relevance
 from .primitives import (
     DEFAULT_CALIBRATION,
     CalibrationTier,
@@ -45,4 +46,6 @@ __all__ = [
     "prune_tool_output",
     "verify_turn_completion",
     "classify_memory_relation",
+    "assess_memory_relation",
+    "assess_memory_relevance",
 ]

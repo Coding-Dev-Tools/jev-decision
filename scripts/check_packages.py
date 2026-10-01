@@ -11,8 +11,20 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 CORE_SMOKE = '''import json, os, subprocess, sys
 from pathlib import Path
+from jev_decision import JevClient, assess_memory_relation, assess_memory_relevance
+from jev_decision.engraphis import EngraphisDecisionClient
 from jev_decision.harnesses import run_harness_command
 from jev_decision.runtime import RuntimeConfig
+assert 'mcp' not in sys.modules and 'engraphis' not in sys.modules
+offline = JevClient(offline_mode=True)
+relation = assess_memory_relation('New factual excerpt', 'Existing factual excerpt', client=offline)
+assert relation['status'] == 'offline' and relation['relation'] is None and relation['advisory_only'] is True
+candidates = {'local-id': 'Authorized excerpt'}
+relevance = assess_memory_relevance('A factual query', candidates, client=offline)
+assert relevance['status'] == 'offline' and relevance['candidates']['local-id']['score'] is None
+assert candidates == {'local-id': 'Authorized excerpt'} and 'Authorized excerpt' not in json.dumps(relevance)
+denied = EngraphisDecisionClient(offline).evaluate('fact', [], model=offline.model)
+assert denied.error_code == 'remote_not_authorized' and not denied.decisions
 root = Path(sys.argv[1])
 root.mkdir()
 captured = subprocess.run([sys.executable, '-I', '-m', 'jev_decision.cli', 'capture',
@@ -31,7 +43,9 @@ text = (root / '.commandcode/skills/jev-advice/SKILL.md').read_text(encoding='ut
 assert 'disable-model-invocation: true' in text and '{{' not in text
 assert run_harness_command('restore', apply=True, **options)['status'] == 'ok'
 assert not (root / '.mcp.json').exists()
-print(json.dumps({'packaged_skill':'command-code','capture_exit_status':7,'provider_calls':0}))
+print(json.dumps({'packaged_skill':'command-code','capture_exit_status':7,
+    'memory_helpers':['assess_memory_relation','assess_memory_relevance'],
+    'engraphis_bridge':'authorization_refusal','provider_calls':0}))
 '''
 SMOKE = '''import asyncio, json, sys
 from mcp import Client
@@ -70,9 +84,13 @@ def main():
         assert any(name.endswith("/LICENSE") for name in archive.namelist())
         assert "jev_decision/resources/jev-skill.md" in archive.namelist()
         assert "jev_decision/resources/command-code-skill.md" in archive.namelist()
+        assert "jev_decision/memory.py" in archive.namelist()
+        assert "jev_decision/engraphis.py" in archive.namelist()
     with tarfile.open(source) as archive:
         assert any(name.endswith("/LICENSE") for name in archive.getnames())
         assert any(name.endswith("/examples/capture.py") for name in archive.getnames())
+        assert any(name.endswith("/examples/memory-advice.json") for name in archive.getnames())
+        assert any(name.endswith("/docs/MEMORY_SYSTEMS.md") for name in archive.getnames())
     for label, artifact in (("wheel", wheel), ("sdist", source)):
         environment = output / label
         run([sys.executable, "-m", "venv", environment])
@@ -92,6 +110,8 @@ def main():
         "clean_installs": ["wheel", "sdist"], "protocols": ["legacy", "2026-07-28"],
         "packaged_skills": ["jev-skill.md", "command-code-skill.md"],
         "packaged_capture": True,
+        "memory_helpers": ["assess_memory_relation", "assess_memory_relevance"],
+        "engraphis_bridge": "offline authorization refusal",
         "provider_calls": 0, "published": False}, indent=2) + "\n", encoding="utf-8")
 
 

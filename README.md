@@ -43,6 +43,8 @@ The [support matrix and recipes](docs/INTEGRATIONS.md) cover Codex, Claude Code/
 
 Command Code users can follow the [dedicated guide](docs/COMMAND_CODE.md) for the optional `/jev-advice` skill, project configuration, and capture-before-reading workflow.
 
+Engraphis and other memory systems can use [structured memory advice and the optional injected-client bridge](docs/MEMORY_SYSTEMS.md). Relation and batched relevance helpers retain uncertainty and provider/cache metadata; the host keeps control of memory access, retrieval and writes. The [native memory example](examples/memory-advice.json) also works with JSON CLI, MCP and TypeScript.
+
 Install or restore only the selected target. Project scopes are supported where the client has a documented project configuration:
 
 ```sh

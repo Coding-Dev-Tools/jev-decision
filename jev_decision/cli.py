@@ -12,6 +12,9 @@ from .harness_guards import guard_bash_command, prune_tool_output, verify_turn_c
 from .mcp import MCPServer, local_status, parse_questions, selection_options
 
 _LOCAL_ERRORS = {
+    "Credential environment variable conflicts with Jev runtime settings": ("credential_variable_conflict", "Choose a dedicated credential variable such as TYPESAFE_API_KEY; JEV_HOME, JEV_ENDPOINT_URL, and JEV_OFFLINE_MODE are runtime settings."),
+    "batch_producer_requires_explicit_interpreter": ("batch_producer_requires_explicit_interpreter", "Call the underlying executable directly, such as node.exe with the package's JavaScript entry point. A batch file requires an explicitly authorized command interpreter."),
+    "evidence_encoding_not_utf8": ("evidence_encoding_not_utf8", "Produce a separate UTF-8 copy using the producer's documented encoding. Retain the original bytes and hash, and read the new copy with its own hash; do not replace undecodable bytes."),
     "API key must be a printable ASCII token of 1-4096 characters, excluding mock/offline": ("invalid_credential_format", "Use the provider key with visible ASCII characters and no internal spaces; mock/offline are not credentials. No key was saved."),
     "Unknown timezone; install timezone data or use UTC": ("invalid_timezone", "Install jev-decision[setup] for timezone data, or use --timezone UTC."),
     "Install jev-decision[setup] or choose an environment reference": ("credential_backend_missing", "Install jev-decision[setup], or choose --credential-source env."),

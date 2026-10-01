@@ -130,13 +130,13 @@ function assertId(value: unknown): asserts value is string {
 const ID_WHITESPACE = "\\x09-\\x0d\\x1c-\\x20\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
 const ID_WORD = "\\p{L}\\p{N}_";
 const ID_WORD_BOUNDARY = `(?:(?<=[${ID_WORD}])(?![${ID_WORD}])|(?<![${ID_WORD}])(?=[${ID_WORD}]))`;
-const ID_SECRET_NAMES = "typesafe_api_key|jev_api_key|api[_-]?key|api[_-]?token|secret|password|passwd|authorization|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|aws_secret_access_key"
+const ID_SECRET_NAMES = "typesafe_api_key|jev_api_key|api[_-]?key|api[_-]?token|secret|password|passwd|authorization|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|aws_secret_access_key|_authToken|_auth"
   .replace(/[iks]/g, letter => ({ i: "[iİı]", k: "[kK]", s: "[sſ]" })[letter]!);
 const ID_URL_USERINFO = new RegExp(`(http[sſ]?://)[^${ID_WHITESPACE}/@]+:[^${ID_WHITESPACE}/@]+@`, "giu");
 const ID_BEARER = new RegExp(`(?<![${ID_WORD}])Bearer[${ID_WHITESPACE}]+[A-Za-zİı0-9._~+/=-]+`, "giu");
-const ID_TOKEN = new RegExp(`(?<![${ID_WORD}])(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,})${ID_WORD_BOUNDARY}`, "gu");
+const ID_TOKEN = new RegExp(`(?<![${ID_WORD}])(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,}|npm_[A-Za-z0-9]{12,}|apikey_[A-Za-z0-9_-]{16,})${ID_WORD_BOUNDARY}`, "gu");
 const ID_JWT = new RegExp(`(?<![${ID_WORD}])eyJ[A-Za-z0-9_-]{5,}\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+${ID_WORD_BOUNDARY}`, "gu");
-const ID_ASSIGNMENT = new RegExp(`(["']?(?:${ID_SECRET_NAMES})["']?[${ID_WHITESPACE}]*[:=][${ID_WHITESPACE}]*)(?:"(?:\\\\[^\\n]|[^"\\\\])*"|'(?:\\\\[^\\n]|[^'\\\\])*'|[^${ID_WHITESPACE},;}\\]]+)`, "giu");
+const ID_ASSIGNMENT = new RegExp(`(["']?(?:${ID_SECRET_NAMES})["']?[${ID_WHITESPACE}]*[:=][${ID_WHITESPACE}]*)(?:"(?:\\\\[^\\n]|[^"\\\\])*"|'(?:\\\\[^\\n]|[^'\\\\])*'|\\[REDACTED\\]|[^${ID_WHITESPACE},;}\\]]+)`, "giu");
 
 /** Match the Python wire-ID safeguards; original IDs stay local to this call. */
 function sanitizeQuestionId(value: string, secret?: string): string {

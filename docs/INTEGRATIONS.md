@@ -25,6 +25,8 @@ Path references: [Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=c
 
 The [Command Code guide](COMMAND_CODE.md) covers the explicit `/jev-advice` skill, capture before ingestion, off/shadow/qualified-select use, and recovery. Command Code and Claude Code can share a project `.mcp.json`; the installer refuses to transfer ownership of one client's managed `jev` entry to the other. Use user scope for independent configurations.
 
+The [memory-system guide](MEMORY_SYSTEMS.md) covers structured Python relation/relevance advice, the installed dependency-free Engraphis injected-client bridge, and a native JSON recipe for CLI/MCP/TypeScript. Engraphis-shaped fixtures verify translation and per-call authorization; they do not establish live Engraphis invocation or retrieval benefit. Memory scope and writes stay with the host.
+
 Targets that lack a detected executable report that fact. Creating an entry or discovering a profile directory does not prove the client can start it. Project trust, managed policy, plugins, and settings precedence can affect discovery. The runtime never changes those policies.
 
 ## Generic MCP

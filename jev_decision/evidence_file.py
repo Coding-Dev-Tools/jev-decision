@@ -13,13 +13,18 @@ import sys
 from pathlib import Path
 from typing import Iterable, Tuple
 
-_DENIED = re.compile(r"(^\.env(?:\.|$))|(?:credentials?|secrets?|passwords?|tokens?|auth(?:entication)?)(?:[._-]|$)|\.(?:pem|key|pfx|p12|sqlite|db)$", re.I)
-_DENIED_DIRS = {".git", ".ssh", ".aws", ".azure", ".gnupg", "secrets", "credentials", "node_modules"}
+_DENIED = re.compile(r"(^\.env(?:\.|$))|(?:credentials?|secrets?|passwords?|tokens?|auth(?:entication)?)(?:[._-]|$)|\.(?:pem|key|pfx|p12|dpapi|jks|sqlite|db)$", re.I)
+_DENIED_DIRS = {".git", ".ssh", ".aws", ".azure", ".gnupg", ".kube", ".docker", "secrets", "credentials", "node_modules"}
+_DENIED_NAMES = {".npmrc", ".pypirc", ".netrc", "_netrc", ".git-credentials",
+                 "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}
 
 
 def _check_name(path: Path) -> None:
-    if any(part.lower() in _DENIED_DIRS or _DENIED.search(part) for part in path.parts):
-        raise ValueError("credential_or_private_file_denied")
+    for part in path.parts:
+        normalized = part.rstrip(" .").casefold() if os.name == "nt" else part.casefold()
+        if (normalized in _DENIED_DIRS or normalized in _DENIED_NAMES or _DENIED.search(normalized)
+                or (os.name == "nt" and ":" in part and part != path.anchor)):
+            raise ValueError("credential_or_private_file_denied")
 
 
 def _plain_windows_name(name: str) -> str:
@@ -194,7 +199,11 @@ def read_evidence_bytes(path: str | Path, roots: Iterable[str | Path], *,
     approved = []
     for root in roots:
         try:
-            canonical = Path(root).resolve(strict=True)
+            # These are operator-approved canonical paths. Re-resolving a
+            # replacement root link would silently grant access to its target.
+            canonical = Path(root)
+            if not canonical.is_absolute():
+                raise ValueError("absolute_workspace_root_required")
             if canonical.is_dir():
                 approved.append(canonical)
         except (OSError, ValueError, RuntimeError):

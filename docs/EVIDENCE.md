@@ -6,6 +6,8 @@ A primary model saves context tokens only when the large output never enters its
 
 The installed `jev capture` command writes stdout and stderr directly to separate binary files, saves a metadata manifest with original hashes and exit status, prints only its reference, and exits with the producer's status. It requires no runtime setup, credentials, or repository checkout. The producer is an explicit argv command executed under ordinary shell permissions; no shell expansion is performed. MCP never executes it. Separate streams preserve their bytes but do not claim a combined chronological ordering. Use a new directory each time; an existing directory is refused. Configure the producer for UTF-8 if it is to be read by the evidence interface. The [checkout helper](../examples/capture.py) and shell wrappers remain compatible.
 
+Windows capture rejects `.cmd`/`.bat` producers and PATH-resolved batch wrappers before launch because those can introduce implicit shell parsing. Call the underlying native executable directly, such as `node.exe --test`. An explicitly supplied command interpreter follows the caller's ordinary authorization for that shell invocation. Evidence decoding stays strict: non-UTF-8 text returns `evidence_encoding_not_utf8`. Retain the original bytes/hash and create a separate UTF-8 derivative using the known producer encoding; never replace undecodable bytes or reuse the original hash for that derivative.
+
 POSIX shell (works when the enclosing script uses `set -e`):
 
 ```sh

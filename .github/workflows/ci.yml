@@ -54,7 +54,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: python-0.3.0-${{ matrix.os }}
-          path: ${{ runner.temp }}/jev-artifacts/dist/*
+          path: |
+            ${{ runner.temp }}/jev-artifacts/dist/*
+            ${{ runner.temp }}/jev-artifacts/verification.json
 
   typescript:
     runs-on: ${{ matrix.os }}
