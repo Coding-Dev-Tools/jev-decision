@@ -115,3 +115,19 @@ def test_published_state_requires_nonempty_supported_json():
         arguments = _examples()
         arguments["state"] = value
         assert not validator.is_valid(arguments)
+
+
+@pytest.mark.parametrize("question", [
+    {"id": " ", "type": "noul", "instructions": "Question?"},
+    {"id": "q", "type": "noul", "instructions": " "},
+    {"id": "q", "type": "choice", "instructions": "Question?", "criteria": {" ": "A", "b": "B"}},
+    {"id": "q", "type": "choice", "instructions": "Question?", "criteria": {"a": " ", "b": "B"}},
+    {"id": "q", "type": "score", "instructions": "Question?", "criteria": ["Same", "Same"]},
+])
+def test_compact_discovery_and_backend_reject_the_same_invalid_content(question):
+    jsonschema = pytest.importorskip("jsonschema")
+    arguments = {"state": "sample", "questions": [question]}
+    assert not jsonschema.Draft202012Validator(_schema()).is_valid(arguments)
+    client = RecordingClient()
+    assert _call(MCPServer(client), arguments)["error"]["code"] == -32602
+    assert client.calls == []

@@ -23,6 +23,10 @@ After `jev setup`, run `jev harness install --target TARGET --scope user --dry-r
 
 Path references: [Codex MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli), [Claude Code MCP](https://code.claude.com/docs/en/mcp), [Claude Desktop local servers](https://modelcontextprotocol.io/docs/develop/connect-local-servers), [Cursor MCP](https://cursor.com/docs/mcp), [Gemini MCP](https://geminicli.com/docs/tools/mcp-server/), [Antigravity MCP](https://antigravity.google/docs/mcp), [OpenCode MCP](https://opencode.ai/docs/mcp-servers/), [Command Code MCP](https://commandcode.ai/docs/mcp#configuration--scopes). Paths and client behavior can change; record versions when verifying a deployment.
 
+## Pre-execution shell guard
+
+MCP tools only run when the primary model decides to call them. For command risk, the better integration point is the harness's own pre-tool hook. `jev hook config TARGET` prints the settings fragment for `claude-code`, `command-code`, `codex`, `cursor` or `gemini-cli`. The hook is escalate-only (ask or deny, never allow), skips plain read-only commands, and fails open. See [HOOKS.md](HOOKS.md) for semantics, fragments and evidence status.
+
 The [Command Code guide](COMMAND_CODE.md) covers the explicit `/jev-advice` skill, capture before ingestion, off/shadow/qualified-select use, and recovery. Command Code and Claude Code can share a project `.mcp.json`; the installer refuses to transfer ownership of one client's managed `jev` entry to the other. Use user scope for independent configurations.
 
 The [memory-system guide](MEMORY_SYSTEMS.md) covers structured Python relation/relevance advice, the installed dependency-free Engraphis injected-client bridge, and a native JSON recipe for CLI/MCP/TypeScript. Engraphis-shaped fixtures verify translation and per-call authorization; they do not establish live Engraphis invocation or retrieval benefit. Memory scope and writes stay with the host.
@@ -45,9 +49,9 @@ Merge the `jev` entry into your client's supported stdio configuration, using ab
 }
 ```
 
-Use `C:/absolute/venv/Scripts/python.exe` on Windows. Install `jev-decision[mcp]` into that exact interpreter. The adapter lazily imports the [official SDK](https://py.sdk.modelcontextprotocol.io/) and preserves `jev-mcp`, `jev mcp`, module execution, and all six tool names. It has typed input/output schemas. Core Python 3.9 imports do not require the SDK.
+Use `C:/absolute/venv/Scripts/python.exe` on Windows. Install `jev-decision[mcp]` into that exact interpreter. On macOS/Linux, use the environment's own `bin/python` path, not the file its symlink points to. A resolved venv, pipx or uv interpreter is the base Python, which cannot import the package. The installer keeps the unresolved path. The adapter lazily imports the [official SDK](https://py.sdk.modelcontextprotocol.io/) and preserves `jev-mcp`, `jev mcp`, module execution, and all six tool names. It has typed input/output schemas. Core Python 3.9 imports do not require the SDK.
 
-Codex uses `[mcp_servers.jev]` in TOML; OpenCode uses `mcp.jev` with `type: "local"`, an argv `command` array and `environment`. The selected installer renders those native formats. Gemini and Claude Code expand `${NAME}` references; Cursor uses `${env:NAME}`. Command Code uses `${NAME:-}` so a missing key permits off reads. These entries contain variable names, never key values. OpenCode inherits its launch environment. For other clients, use an OS vault or verify how that exact client passes an environment variable. GUI launches may not inherit a terminal's environment.
+Codex uses `[mcp_servers.jev]` in TOML; OpenCode uses `mcp.jev` with `type: "local"`, an argv `command` array and `environment`. The selected installer renders those native formats. Gemini expands `${NAME}` references; Cursor uses `${env:NAME}`. Claude Code and Command Code use `${NAME:-}`, because Claude Code passes an unset `${NAME}` through as literal text. The empty default keeps a missing key missing and still allows off reads. The runtime also treats any unexpanded `${NAME}`, `{env:NAME}`, `$NAME` or `%NAME%` value as an absent key, so a placeholder can never authenticate or hold budget. These entries contain variable names, never key values. OpenCode inherits its launch environment. For other clients, use an OS vault or verify how that exact client passes an environment variable. GUI launches may not inherit a terminal's environment.
 
 ## Generic JSON CLI
 

@@ -2,6 +2,7 @@
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tarfile
@@ -9,14 +10,18 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+VERSION = re.search(r'__version__ = "([^"]+)"', (ROOT / "jev_decision/_version.py").read_text(encoding="utf-8")).group(1)
 CORE_SMOKE = '''import json, os, subprocess, sys
 from pathlib import Path
 from jev_decision import JevClient, assess_memory_relation, assess_memory_relevance
 from jev_decision.engraphis import EngraphisDecisionClient
+from jev_decision.hooks import run_hook
 from jev_decision.harnesses import run_harness_command
 from jev_decision.runtime import RuntimeConfig
 assert 'mcp' not in sys.modules and 'engraphis' not in sys.modules
 offline = JevClient(offline_mode=True)
+assert run_hook('claude-code', json.dumps({'tool_name': 'Bash', 'permission_mode': 'default',
+    'tool_input': {'command': 'rm -rf build/'}}).encode(), client=offline, environ={}) == ''
 relation = assess_memory_relation('New factual excerpt', 'Existing factual excerpt', client=offline)
 assert relation['status'] == 'offline' and relation['relation'] is None and relation['advisory_only'] is True
 candidates = {'local-id': 'Authorized excerpt'}
@@ -39,6 +44,12 @@ assert manifest['streams']['stdout']['bytes'] > 0 and manifest['streams']['stder
 config = RuntimeConfig(home=root / 'state', daily_budget_usd=0, credential_source='env')
 options = dict(target='command-code', scope='project', project_root=root, config=config)
 assert run_harness_command('install', apply=True, **options)['status'] == 'ok'
+# The generated launcher must be the environment's own interpreter: a resolved
+# POSIX venv symlink would point at a base Python without this package.
+entry = json.loads((root / '.mcp.json').read_text(encoding='utf-8'))['mcpServers']['jev']
+probe = subprocess.run([entry['command'], '-I', '-c', 'import jev_decision.mcp, jev_decision.hooks'],
+    capture_output=True, timeout=60)
+assert probe.returncode == 0, probe.stderr[-400:]
 text = (root / '.commandcode/skills/jev-advice/SKILL.md').read_text(encoding='utf-8')
 assert 'disable-model-invocation: true' in text and '{{' not in text
 assert run_harness_command('restore', apply=True, **options)['status'] == 'ok'
@@ -86,17 +97,21 @@ def main():
         assert "jev_decision/resources/command-code-skill.md" in archive.namelist()
         assert "jev_decision/memory.py" in archive.namelist()
         assert "jev_decision/engraphis.py" in archive.namelist()
+        assert "jev_decision/hooks.py" in archive.namelist()
+        assert "jev_decision/_version.py" in archive.namelist()
     with tarfile.open(source) as archive:
         assert any(name.endswith("/LICENSE") for name in archive.getnames())
         assert any(name.endswith("/examples/capture.py") for name in archive.getnames())
         assert any(name.endswith("/examples/memory-advice.json") for name in archive.getnames())
         assert any(name.endswith("/docs/MEMORY_SYSTEMS.md") for name in archive.getnames())
+        assert any(name.endswith("/docs/HOOKS.md") for name in archive.getnames())
     for label, artifact in (("wheel", wheel), ("sdist", source)):
         environment = output / label
         run([sys.executable, "-m", "venv", environment])
         python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
         run([python, "-m", "pip", "install", "--no-cache-dir", artifact])
-        run([python, "-I", "-c", "import sys, jev_decision, jev_decision.cli; assert jev_decision.__version__ == '0.3.0'; assert 'mcp' not in sys.modules"])
+        run([python, "-I", "-c", "import sys, jev_decision, jev_decision.cli; assert jev_decision.__version__ == " + repr(VERSION)
+            + "; assert 'mcp' not in sys.modules"])
         run([python, "-I", "-m", "jev_decision.cli", "doctor", "--json"])
         core_script = outside / (label + "_core.py")
         core_script.write_text(CORE_SMOKE, encoding="utf-8")
@@ -105,13 +120,14 @@ def main():
         script = outside / (label + "_mcp.py")
         script.write_text(SMOKE, encoding="utf-8")
         run([python, "-I", script, env["JEV_HOME"]])
-    (output / "verification.json").write_text(json.dumps({"version": "0.3.0", "platform": sys.platform,
+    (output / "verification.json").write_text(json.dumps({"version": VERSION, "platform": sys.platform,
         "python": sys.version.split()[0], "wheel": wheel.name, "source": source.name,
         "clean_installs": ["wheel", "sdist"], "protocols": ["legacy", "2026-07-28"],
         "packaged_skills": ["jev-skill.md", "command-code-skill.md"],
         "packaged_capture": True,
         "memory_helpers": ["assess_memory_relation", "assess_memory_relevance"],
         "engraphis_bridge": "offline authorization refusal",
+        "shell_hook": "offline fail-open",
         "provider_calls": 0, "published": False}, indent=2) + "\n", encoding="utf-8")
 
 

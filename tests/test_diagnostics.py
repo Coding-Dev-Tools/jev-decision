@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jev_decision import budget, cli
+from jev_decision import __version__, budget, cli
 from jev_decision.client import JevClient
 from jev_decision.runtime import RuntimeConfig
 
@@ -61,7 +61,7 @@ def test_live_doctor_with_corrupt_ledger_keeps_budget_failure(tmp_path, monkeypa
     assert result["live_result"]["error_code"] == "budget_unavailable"
     assert result["live_result"]["attempts"] == 0
     assert result["authentication_status"] == "failed"
-    assert result["version"] == "0.3.0"
+    assert result["version"] == __version__
     assert config.ledger_path.read_bytes() == b"invalid-sqlite-database"
 
 

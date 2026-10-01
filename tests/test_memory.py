@@ -151,6 +151,7 @@ def test_stale_advice_is_never_projected_by_python_helpers(changes):
     assert classify_memory_relation("new fact", "old fact", client=injected) == "unavailable"
     guard = guard_bash_command("git status", client=injected)
     assert guard["risk_category"] == "unavailable" and guard["risk_probability"] is None
+    assert guard["category_probabilities"] is None
     completion = verify_turn_completion("goal", "actions", "output", client=injected)
     assert completion["support_probability"] is completion["verification_gap_probability"] is None
 

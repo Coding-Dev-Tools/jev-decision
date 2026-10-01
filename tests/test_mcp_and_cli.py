@@ -135,3 +135,41 @@ def test_cli_invalid_input_is_content_free():
         input='secret-sensitive-invalid-json', text=True, capture_output=True, timeout=10)
     assert completed.returncode == 2
     assert 'secret-sensitive' not in completed.stdout + completed.stderr
+
+
+def test_cli_explains_how_to_enable_a_fresh_installation(capsys):
+    from jev_decision.cli import main
+    assert main(["guard", "git status"]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["error_code"] == "runtime_disabled" and "jev setup" in result["hint"]
+
+
+@pytest.mark.parametrize('questions', [
+    {'x': {'type': 'noul', 'instructions': 'Is this a sample?'}},
+    [{'id': 'x', 'type': 'choice', 'prompt': 'Which kind?', 'options': ['a', 'b']}],
+    [{'id': 'x', 'type': 'score', 'instructions': 'How relevant?', 'scale': ['Unrelated', 'Related']}],
+])
+def test_compact_advertised_schema_still_accepts_every_supported_form(questions):
+    # Discovery advertises the compact array form to save model context; the
+    # server keeps validating native maps and legacy fields with the full schema.
+    Client = sdk()
+    from jev_decision.schemas import INPUT_VALIDATION_SCHEMAS
+    async def check():
+        async with Client(create_sdk_server(MCPServer(JevClient(offline_mode=True)))) as client:
+            result = await client.call_tool('jev_decide', {'state': 'sample', 'questions': questions})
+            assert result.structured_content['error_code'] == 'offline'
+            tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+            assert len(json.dumps(tools['jev_decide'].input_schema)) < len(
+                json.dumps(INPUT_VALIDATION_SCHEMAS['jev_decide']))
+    asyncio.run(check())
+
+
+def test_cli_explains_a_zero_budget(capsys, tmp_path, monkeypatch):
+    from jev_decision.cli import main
+    from jev_decision.runtime import RuntimeConfig
+    RuntimeConfig(home=RuntimeConfig.load().home, daily_budget_usd=0).save()
+    assert main(["decide", "--file", str(Path(__file__).resolve().parents[1] / "examples/route.json")]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["error_code"] == "runtime_disabled" and "--daily-budget" in result["hint"]
+    assert main(["doctor", "--live", "--json"]) == 2
+    assert "--daily-budget" in json.loads(capsys.readouterr().out)["hint"]

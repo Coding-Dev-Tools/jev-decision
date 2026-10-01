@@ -288,6 +288,32 @@ def test_file_evidence_denies_secrets_and_escape(tmp_path):
     with pytest.raises(ValueError, match="outside_approved"):
         read_evidence_file(str(approved / ".." / "outside" / "build.log"), "inspect", [str(approved)])
 
+@pytest.mark.parametrize("ancestor", ["auth-service", "oauth_app", "secrets-manager", "token.bridge"])
+def test_private_name_screen_starts_below_the_approved_root(tmp_path, ancestor):
+    # Operators commonly keep projects under names like auth-service/. The
+    # Generic private words in ancestors are allowed; hard credential paths are not.
+    root = tmp_path / ancestor / "workspace"
+    (root / "run").mkdir(parents=True)
+    (root / "run" / "stdout.log").write_bytes(b"collected 3 items\n")
+    result = read_evidence_file(str(root / "run" / "stdout.log"), "inspect", [str(root)])
+    assert result["status"] == "ok" and result["output"] == "collected 3 items\n"
+    for relative in (".env", ".git/config", "secrets/run.log", "run/credentials.json", "keys/server.pem"):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("content")
+        with pytest.raises(ValueError, match="credential_or_private_file_denied"):
+            read_evidence_file(str(path), "inspect", [str(root)])
+
+@pytest.mark.parametrize("ancestor", [".ssh", ".kube", ".aws", ".docker", "secrets", "credentials"])
+def test_approved_root_cannot_exempt_hard_credential_directories(tmp_path, ancestor):
+    root = tmp_path / ancestor / "workspace"
+    root.mkdir(parents=True)
+    path = root / "run.log"
+    path.write_text("private content")
+    with pytest.raises(ValueError, match="credential_or_private_file_denied"):
+        read_evidence_file(str(path), "inspect", [str(root)])
+
+
 def test_file_evidence_denies_symlink_escape(tmp_path):
     approved = tmp_path / "approved"
     approved.mkdir()

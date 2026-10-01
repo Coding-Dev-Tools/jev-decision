@@ -308,6 +308,22 @@ def _location(name, default, filename=None):
     return path
 
 
+def launcher_python() -> str:
+    """Absolute path of the interpreter that has this package installed.
+
+    POSIX virtual environments (venv, pipx, uv tool) expose ``bin/python`` as a
+    symlink to the base interpreter; only the unresolved path activates the
+    environment's site-packages, so it must never be resolved there. Windows
+    environment interpreters are real files, and resolving maps an
+    MSIX-virtualized path to the physical file other processes can launch.
+    """
+    if not sys.executable:
+        raise HarnessError("python_executable_unavailable")
+    if os.name == "nt":
+        return str(Path(sys.executable).resolve())
+    return os.path.abspath(sys.executable)
+
+
 def _skill(python, inactive=False, runtime_home=None, template_name="jev-skill.md"):
     template = (Path(__file__).parent / "resources" / template_name).read_text(encoding="utf-8")
     command = ("& '" + python.replace("'", "''") + "'" if os.name == "nt" else shlex.quote(python))
@@ -349,7 +365,7 @@ def _discover(target=None, scope="user", project_root=None, runtime=None):
                               {"command-code", "antigravity", "antigravity-ide", "claude-desktop", "cursor", "crush"})
     xdg = selected_location("XDG_CONFIG_HOME", home / ".config", {"opencode", "crush"})
     codex = selected_location("CODEX_HOME", home / ".codex", {"codex"})
-    python = str(Path(sys.executable).resolve())
+    python = launcher_python()
     stdio = {"command": python, "args": ["-I", "-m", "jev_decision.mcp"],
              "env": {"JEV_HOME": str(runtime.home)}}
     artifacts, clients = {}, []
@@ -415,7 +431,9 @@ def _discover(target=None, scope="user", project_root=None, runtime=None):
             skill_root=gemini / "config" / "skills", executable=local / "Programs" / folder / exe)
     claude_stdio = dict(stdio, type="stdio", env=dict(stdio["env"]))
     if runtime.credential_source == "env":
-        claude_stdio["env"][runtime.key_env] = "${" + runtime.key_env + "}"
+        # Claude Code passes an unset ${NAME} through as literal text; the empty
+        # default keeps a missing key missing (and off reads available).
+        claude_stdio["env"][runtime.key_env] = "${" + runtime.key_env + ":-}"
     add("claude-code", home / ".claude", ["claude"], home / ".claude.json", value=claude_stdio,
         skill_root=home / ".claude" / "skills")
     if sys.platform == "win32":

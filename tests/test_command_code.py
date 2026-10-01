@@ -78,7 +78,7 @@ def test_command_code_installs_manual_skill_and_restores_owned_entries(command_c
     assert result["status"] == "ok" and len(result["items"]) == 2
     entry = json.loads(config_path.read_text())["mcpServers"]["jev"]
     assert entry["transport"] == "stdio" and entry["enabled"] is True
-    assert entry["command"] == str(Path(sys.executable).resolve())
+    assert entry["command"] == harnesses.launcher_python()
     assert entry["args"] == ["-I", "-m", "jev_decision.mcp"]
     assert entry["env"] == {"JEV_HOME": str(config.home), config.key_env: "${JEV_COMMAND_CODE_TEST_KEY:-}"}
     skill = root / ".commandcode/skills/jev-advice/SKILL.md"
@@ -86,7 +86,7 @@ def test_command_code_installs_manual_skill_and_restores_owned_entries(command_c
     assert "disable-model-invocation: true" in text
     assert "allowed-tools:" not in text and "disallowed-tools:" not in text
     assert "mcp__jev__jev_read_evidence" in text and "--runtime-home" in text
-    assert str(config.home) in text and str(Path(sys.executable).resolve()) in text
+    assert str(config.home) in text and harnesses.launcher_python() in text
     assert "{{" not in text
     assert result["harnesses"][0]["actual_client_verified"] is False
     for path, before in untouched.items():

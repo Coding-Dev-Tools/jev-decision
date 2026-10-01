@@ -12,10 +12,10 @@ from .harness_guards import guard_bash_command, prune_tool_output, verify_turn_c
 from .mcp import MCPServer, local_status, parse_questions, selection_options
 
 _LOCAL_ERRORS = {
-    "Credential environment variable conflicts with Jev runtime settings": ("credential_variable_conflict", "Choose a dedicated credential variable such as TYPESAFE_API_KEY; JEV_HOME, JEV_ENDPOINT_URL, and JEV_OFFLINE_MODE are runtime settings."),
+    "Credential environment variable conflicts with Jev runtime settings": ("credential_variable_conflict", "Choose a dedicated credential variable such as TYPESAFE_API_KEY; JEV_HOME, JEV_ENDPOINT_URL, JEV_OFFLINE_MODE, JEV_HOOK, and JEV_HOOK_THRESHOLD are runtime settings."),
     "batch_producer_requires_explicit_interpreter": ("batch_producer_requires_explicit_interpreter", "Call the underlying executable directly, such as node.exe with the package's JavaScript entry point. A batch file requires an explicitly authorized command interpreter."),
     "evidence_encoding_not_utf8": ("evidence_encoding_not_utf8", "Produce a separate UTF-8 copy using the producer's documented encoding. Retain the original bytes and hash, and read the new copy with its own hash; do not replace undecodable bytes."),
-    "API key must be a printable ASCII token of 1-4096 characters, excluding mock/offline": ("invalid_credential_format", "Use the provider key with visible ASCII characters and no internal spaces; mock/offline are not credentials. No key was saved."),
+    "API key must be a printable ASCII token of 1-4096 characters, excluding mock/offline": ("invalid_credential_format", "Use the provider key with visible ASCII characters and no internal spaces; mock/offline and unexpanded ${NAME} references are not credentials. No key was saved."),
     "Unknown timezone; install timezone data or use UTC": ("invalid_timezone", "Install jev-decision[setup] for timezone data, or use --timezone UTC."),
     "Install jev-decision[setup] or choose an environment reference": ("credential_backend_missing", "Install jev-decision[setup], or choose --credential-source env."),
     "OS credential storage is unavailable; choose an environment reference": ("credential_backend_unavailable", "Unlock the OS credential store, or choose --credential-source env."),
@@ -30,6 +30,20 @@ _LOCAL_ERRORS = {
     "project_root_not_found": ("project_root_not_found", "Set --project-root to an existing project directory."),
     "absolute_new_directory_and_producer_required": ("invalid_capture_arguments", "Use capture --directory ABSOLUTE_NEW_DIRECTORY -- PROGRAM [ARGS...]."),
 }
+
+
+_SETUP_HINT = ("Fresh installations make no provider calls. Run `jev setup` to choose a credential source "
+               "and daily budget, then retry.")
+
+
+def _disabled_hint(config, result):
+    if not isinstance(result, dict) or result.get("error_code") != "runtime_disabled":
+        return None
+    if not config.setup_complete:
+        return _SETUP_HINT
+    if config.daily_budget_usd == 0:
+        return "The saved daily budget is 0, which disables provider calls. Run `jev setup --non-interactive --daily-budget 1` (or another cap)."
+    return None
 
 
 def _print(value):
@@ -51,7 +65,50 @@ def _input(path):
         raise ValueError("input_limit")
     return value
 
+def _hook_run(argv):
+    """`jev [--runtime-home DIR] hook run HARNESS`: never block the harness on our own failure.
+
+    Exit code 2 means "block" to several harnesses, so every local problem,
+    including argument errors from a stale snippet, exits 0 with no decision.
+    """
+    from .hooks import HOOK_HARNESSES, run_hook
+
+    class QuietParser(argparse.ArgumentParser):
+        def error(self, message):
+            raise ValueError("invalid_hook_arguments")
+
+    parser = QuietParser(prog="jev hook run", add_help=False)
+    parser.add_argument("--runtime-home")
+    parser.add_argument("hook")
+    parser.add_argument("action")
+    parser.add_argument("harness", choices=HOOK_HARNESSES)
+    parser.add_argument("--threshold", type=float)
+    parser.add_argument("--when", choices=["unattended", "always"], default="unattended")
+    try:
+        args, _ = parser.parse_known_args(argv)
+        if args.runtime_home:
+            home = Path(args.runtime_home).expanduser()
+            if not home.is_absolute():
+                return 0
+            os.environ["JEV_HOME"] = str(home.resolve())
+        stream = getattr(sys.stdin, "buffer", None)
+        raw = stream.read(262145) if stream is not None else sys.stdin.read(262145).encode("utf-8")
+        output = run_hook(args.harness, raw, threshold=args.threshold, when=args.when)
+    except (SystemExit, Exception):
+        return 0
+    if output:
+        sys.stdout.write(output + "\n")
+    return 0
+
+
+def _is_hook_run(argv):
+    return "hook" in argv and argv[argv.index("hook") + 1:argv.index("hook") + 2] == ["run"]
+
+
 def main(argv=None):
+    argv = sys.argv[1:] if argv is None else list(argv)
+    if _is_hook_run(argv):
+        return _hook_run(argv)
     parser = argparse.ArgumentParser(prog="jev", description="Managed Jev advisory decisions")
     parser.add_argument("--runtime-home", help="Absolute shared state directory for this invocation")
     commands = parser.add_subparsers(dest="subcommand", required=True)
@@ -116,6 +173,14 @@ def main(argv=None):
     harness.add_argument("--dry-run", action="store_true")
     harness.add_argument("--json", action="store_true")
     commands.add_parser("mcp", help="Run the stdio server")
+    from .hooks import HOOK_HARNESSES
+    hook = commands.add_parser("hook", help="Escalate-only pre-execution shell guard for harness hooks")
+    hook.add_argument("action", choices=["run", "config"],
+                      help="run: read one hook payload on stdin; config: print the settings fragment to merge")
+    hook.add_argument("harness", choices=HOOK_HARNESSES)
+    hook.add_argument("--threshold", type=float)
+    hook.add_argument("--when", choices=["unattended", "always"], default="unattended",
+                      help="Deny-only harnesses: act only in no-prompt sessions (default) or always")
     args = parser.parse_args(argv)
     try:
         if args.subcommand == "capture":
@@ -138,6 +203,10 @@ def main(argv=None):
             return 0 if result.get("status") == "ok" else 2
         if args.subcommand == "mcp":
             MCPServer().run_stdio()
+            return 0
+        if args.subcommand == "hook":
+            from .hooks import hook_config
+            _print(hook_config(args.harness, runtime_home=config.home, when=args.when))
             return 0
         if args.subcommand == "auth":
             from .credentials import credential_status, set_api_key_interactive
@@ -172,6 +241,9 @@ def main(argv=None):
                     {"message": "The sample log reports a failed unit test."},
                     {"failure_present": {"type": "noul", "instructions": "Does the sample message report a failed unit test?"}}).to_dict()
                 result["authenticated"] = result["live_result"]["status"] == "ok" and result["live_result"]["source"] == "provider"
+                hint = _disabled_hint(config, result["live_result"])
+                if hint:
+                    result["hint"] = hint
                 result["authentication_status"] = "verified" if result["authenticated"] else "failed"
                 from .budget import BudgetLedger
                 try:
@@ -218,6 +290,9 @@ def main(argv=None):
                     sys.stderr.write(json.dumps(stats, allow_nan=False) + "\n")
                 return 0
             result = {"output": output, "stats": stats}
+        hint = _disabled_hint(config, result)
+        if hint:
+            result = {**result, "hint": hint}
         _print(result)
         return 2 if result.get("status") == "unavailable" else 0
     except (ValueError, OSError, UnicodeError, RuntimeError) as error:

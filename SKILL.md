@@ -16,3 +16,5 @@ Treat status unavailable or offline as no advice. Continue normal reasoning and 
 Automatic pruning stays off until independently labeled development and held-out validation demonstrates useful savings while preserving required evidence. Keep uncertain content. Do not claim percentage savings, billing savings or improved correctness without measurements.
 
 Use jev_guard_command only for nontrivial risk triage and jev_verify_completion only to identify evidence gaps. Never use either as a permission gate or completion certificate. Never mutate memory or benchmark grades solely from Jev output.
+
+If a Jev guard hook asks for confirmation or blocks a shell command, tell the user what was flagged and let them decide. Never rephrase, split or obfuscate a command to get past the guard.

@@ -99,10 +99,20 @@ def _restrict_acl(path: Path, *, directory: bool) -> None:
         raise CredentialError("Unable to restrict credential permissions") from None
 
 
+# Harness configurations reference variables as ${NAME}, ${NAME:-}, ${env:NAME},
+# {env:NAME}, $NAME or %NAME%. Some clients pass an unset reference through as
+# literal text; such a placeholder is an absent credential, never a key.
+_PLACEHOLDER = re.compile(r"\$\{[^{}]*\}|\{env:[^{}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%")
+
+
+def _is_placeholder(value: Any) -> bool:
+    return isinstance(value, str) and _PLACEHOLDER.fullmatch(value.strip()) is not None
+
+
 def _valid_key_format(value: Any) -> bool:
     """Match the HTTP client's credential format without accessing any store."""
     return (isinstance(value, str) and 1 <= len(value) <= 4096
-            and value.lower() not in ("mock", "offline")
+            and value.lower() not in ("mock", "offline") and not _is_placeholder(value)
             and all(33 <= ord(character) <= 126 for character in value))
 
 
@@ -233,7 +243,7 @@ def load_api_key(config: Optional[RuntimeConfig] = None, allow_environment: bool
         names = (config.key_env,) if config.credential_source == "env" else ("TYPESAFE_API_KEY", "JEV_API_KEY")
         for name in names:
             value = os.environ.get(name)
-            if value and value.strip():
+            if value and value.strip() and not _is_placeholder(value):
                 return _validated_key(value)
     return None
 
@@ -243,7 +253,8 @@ def credential_status(config: Optional[RuntimeConfig] = None) -> Dict[str, Any]:
     config = config or RuntimeConfig.load()
     managed_present = config.credential_path.is_file() if config.credential_source in {"auto", "dpapi"} else False
     names = (config.key_env,) if config.credential_source == "env" else ("TYPESAFE_API_KEY", "JEV_API_KEY")
-    environment_present = (any(bool(os.environ.get(name, "").strip()) for name in names)
+    environment_present = (any(bool(os.environ.get(name, "").strip()) and not _is_placeholder(os.environ[name])
+                               for name in names)
                            if config.credential_source in {"auto", "env"} else False)
     keyring_selected = config.credential_source == "keyring"
     return {"managed_present": managed_present, "environment_present": environment_present,

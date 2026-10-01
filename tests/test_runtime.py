@@ -62,6 +62,7 @@ def test_public_config_atomic_roundtrip(isolated_runtime, tmp_path):
     {"credential_source": "plaintext"}, {"key_env": "KEY=secret"}, {"setup_complete": 1},
     {"key_env": "JEV_HOME"}, {"key_env": "jev_home"},
     {"key_env": "JEV_ENDPOINT_URL"}, {"key_env": "JEV_OFFLINE_MODE"},
+    {"key_env": "JEV_HOOK"}, {"key_env": "jev_hook_threshold"},
     {"selection_mode": "select"}, {"selection_mode": "anything"}, {"qualified_profile_path": "relative"},
     {"max_request_bytes": 24577}, {"max_response_bytes": 262145}, {"timeout_s": float("nan")},
 ])

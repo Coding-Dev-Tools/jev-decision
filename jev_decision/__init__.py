@@ -1,5 +1,6 @@
 """Portable advisory TypeSafe Jev decisions with optional MCP and OS credentials."""
 
+from ._version import __version__
 from .client import DEFAULT_MODEL, JevClient, normalize_questions, validate_response, validate_state
 from .fallback import evaluate_heuristics
 from .harness_guards import (
@@ -23,8 +24,8 @@ from .primitives import (
     ScoreQuestion,
 )
 
-__version__ = "0.3.0"
 __all__ = [
+    "__version__",
     "JevClient",
     "DEFAULT_MODEL",
     "normalize_questions",

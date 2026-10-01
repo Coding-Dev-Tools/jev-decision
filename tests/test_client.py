@@ -5,6 +5,7 @@ import json
 import threading
 import time
 import urllib.request
+from decimal import Decimal
 
 import pytest
 
@@ -529,3 +530,66 @@ def test_retry_after_date_and_delta_parsing():
     assert _retry_after({"Retry-After": "Mon, 28 Sep 2099 12:00:00 GMT"}) > 1
     for value in ["-1", "nan", "infinity", "not a date", "9" * 129]:
         assert _retry_after({"retry-after": value}) is None
+
+
+def _noul_transport(calls):
+    def transport(request, timeout_s, limit):
+        body = json.loads(request.data)
+        calls.append(body)
+        answers = {key: {"type": "noul", "noul": 0.25} for key in body["questions"]}
+        return 200, json.dumps({"model": body["model"], "answers": answers,
+                                "usage": {"input_tokens": 12, "output_tokens": 0}}).encode()
+    return transport
+
+
+def test_library_key_before_setup_is_an_explicit_opt_in():
+    # README-level usage must work without `jev setup`; the default daily budget
+    # and shared ledger still bound spend.
+    calls = []
+    client = JevClient(api_key="synthetic-library-key", transport=_noul_transport(calls))
+    assert client.is_configured and client.runtime.enabled and not client.runtime.setup_complete
+    result = client.evaluate("sample", {"q": {"type": "noul", "instructions": "Is this a sample?"}})
+    assert result.status == "ok" and result.source == "provider" and len(calls) == 1
+    assert client.runtime.ledger_path.exists() and not client.runtime.config_path.exists()
+    assert client.runtime.daily_budget_usd == Decimal("1.00")
+
+
+@pytest.mark.parametrize("name", ["TYPESAFE_API_KEY", "JEV_API_KEY"])
+def test_ambient_key_does_not_authorize_fresh_library_calls(monkeypatch, name):
+    monkeypatch.setenv(name, "synthetic-library-key")
+    client = JevClient(transport=lambda *_: pytest.fail("Ambient key authorized a request"))
+    result = client.evaluate("sample", {"q": {"type": "noul", "instructions": "Is it?"}})
+    assert result.error_code == "runtime_disabled" and result.attempts == 0
+    assert not client.runtime.home.exists()
+
+
+def test_saved_or_harness_runtime_is_not_upgraded_by_a_library_key(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "synthetic-library-key")
+    unused = lambda *_: pytest.fail("Disabled runtime reached the provider")  # noqa: E731
+    # CLI/MCP pass their loaded runtime explicitly; a fresh install stays offline.
+    harness = JevClient(runtime=RuntimeConfig.load(), transport=unused)
+    assert harness.evaluate("sample", {"q": {"type": "noul", "instructions": "Is it?"}}).error_code == "runtime_disabled"
+    # A saved configuration, including a disabled one, is always respected.
+    RuntimeConfig(home=RuntimeConfig.load().home, daily_budget_usd=0).save()
+    for client in (JevClient(transport=unused), JevClient(api_key="synthetic-library-key", transport=unused)):
+        assert client.evaluate("sample", {"q": {"type": "noul", "instructions": "Is it?"}}).error_code == "runtime_disabled"
+    monkeypatch.setenv("TYPESAFE_API_KEY", "${TYPESAFE_API_KEY}")
+    assert not JevClient().is_configured
+
+
+def test_plain_question_objects_match_the_mcp_and_typescript_form():
+    plain = [{"id": "intent", "type": "choice", "instructions": "Classify the change.",
+              "criteria": {"feature": "Adds behavior", "bug": "Fixes behavior", "unclear": None}},
+             {"id": "legacy", "type": "score", "prompt": "How relevant?", "scale": ["Unrelated", "Related"]},
+             NoulQuestion("typed", "Is this a sample?")]
+    assert normalize_questions(plain) == {
+        "intent": {"type": "choice", "instructions": "Classify the change.",
+                   "criteria": {"feature": "Adds behavior", "bug": "Fixes behavior", "unclear": None}},
+        "legacy": {"type": "score", "instructions": "How relevant?", "criteria": ["Unrelated", "Related"]},
+        "typed": {"type": "noul", "instructions": "Is this a sample?"}}
+    for bad in ([{"id": "x", "type": "noul", "instructions": "Q?", "unexpected": 1}],
+                [{"id": "x", "type": "unknown", "instructions": "Q?"}],
+                [{"type": "noul", "instructions": "Q?"}],
+                [{"id": "x", "type": "noul", "instructions": "Q?"}, {"id": "x", "type": "noul", "instructions": "R?"}]):
+        with pytest.raises(ValueError):
+            normalize_questions(bad)

@@ -22,9 +22,9 @@ The source validation on 2026-09-28–29 used Windows, Python 3.12.10, Node 24.1
 | Installed capture | CLI preserves argv, binary streams and producer exit status without runtime configuration; original checkout wrappers retained |
 | Static checks | Full configured Ruff rules and Git whitespace checks passed |
 
-CI runs the suite on Windows, macOS and Linux with Python 3.9–3.13. Core-only Python 3.9 skips optional SDK tests. Python 3.12 jobs also install wheel and source artifacts outside the checkout; all three Node jobs check npm archive installation. CI status must be read for the exact PR head before claiming those remote checks passed.
+CI runs the suite on Windows, macOS and Linux with Python 3.9–3.14. Core-only Python 3.9 skips optional SDK tests. Python 3.12 jobs also install wheel and source artifacts outside the checkout; Node 22 and 24 jobs on all three systems check npm archive installation. CI status must be read for the exact PR head before claiming those remote checks passed.
 
-The [comprehensive release review](release-review-20260928.md) records the four independent review lanes, corrected edge cases and remaining evidence boundaries.
+The [comprehensive release review](release-review-20260928.md) records the four independent review lanes, corrected edge cases and remaining evidence boundaries. The [merge-readiness review of 2026-09-30](release-review-20260930.md) records later fixes, including generated POSIX venv interpreters, library opt-in, placeholder credentials, and evidence name screening. It also covers the escalate-only `jev hook` guard, the compact MCP schema, and the validation run on Python 3.9–3.14.
 
 ## Offline four-arm report
 

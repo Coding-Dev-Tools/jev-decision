@@ -19,12 +19,50 @@ _DENIED_NAMES = {".npmrc", ".pypirc", ".netrc", "_netrc", ".git-credentials",
                  "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"}
 
 
-def _check_name(path: Path) -> None:
+def _normalized_name(part: str) -> str:
+    return part.rstrip(" .").casefold() if os.name == "nt" else part.casefold()
+
+
+def _denied(parts: Iterable[str]) -> bool:
+    return any((name := _normalized_name(part)) in _DENIED_DIRS or name in _DENIED_NAMES
+               or _DENIED.search(name) for part in parts)
+
+
+def _check_sensitive_location(path: Path) -> None:
+    # Explicit workspace roots can exempt generic project names such as
+    # auth-service, but cannot exempt known credential locations or NTFS streams.
     for part in path.parts:
-        normalized = part.rstrip(" .").casefold() if os.name == "nt" else part.casefold()
-        if (normalized in _DENIED_DIRS or normalized in _DENIED_NAMES or _DENIED.search(normalized)
+        name = _normalized_name(part)
+        if (name in _DENIED_DIRS or name in _DENIED_NAMES or name == ".env" or name.startswith(".env.")
+                or re.search(r"\.(?:pem|key|pfx|p12|dpapi|jks|sqlite|db)$", name)
                 or (os.name == "nt" and ":" in part and part != path.anchor)):
             raise ValueError("credential_or_private_file_denied")
+
+
+def _check_name(path: Path) -> None:
+    _check_sensitive_location(path)
+    if _denied(path.parts):
+        raise ValueError("credential_or_private_file_denied")
+
+
+def _check_below(path: Path, roots: Iterable[Path]) -> None:
+    """Deny private names below the approved root that grants access.
+
+    The operator approved the root itself, so its own ancestors (for example a
+    project checked out under ``auth-service/``) are not re-screened. Paths not
+    textually inside any root keep the conservative whole-path check.
+    """
+    _check_sensitive_location(path)
+    parts, granting = _parts(path), None
+    for root in roots:
+        prefix = _parts(root)
+        if len(parts) > len(prefix) and parts[:len(prefix)] == prefix and (
+                granting is None or len(prefix) > len(granting)):
+            granting = prefix
+    if granting is None:
+        _check_name(path)
+    elif _denied(parts[len(granting):]):
+        raise ValueError("credential_or_private_file_denied")
 
 
 def _plain_windows_name(name: str) -> str:
@@ -163,14 +201,18 @@ def _snapshot(info: os.stat_result) -> tuple:
 
 
 def _validate_handle(descriptor: int, expected: Path, roots: list[Path],
-                     original: os.stat_result, max_bytes: int) -> Tuple[Path, os.stat_result]:
+                     original: os.stat_result, max_bytes: int,
+                     whole_path_names: bool = False) -> Tuple[Path, os.stat_result]:
     actual = os.fstat(descriptor)
     if not stat.S_ISREG(actual.st_mode) or not 0 <= actual.st_size <= max_bytes:
         raise ValueError("evidence_file_limit")
     if _snapshot(actual) != _snapshot(original):
         raise ValueError("evidence_source_changed")
     opened = _handle_path(descriptor)
-    _check_name(opened)
+    if whole_path_names:
+        _check_name(opened)
+    else:
+        _check_below(opened, roots)
     if not any(_within(opened, root) for root in roots):
         raise ValueError("outside_approved_workspace")
     if _parts(opened) != _parts(expected):
@@ -191,11 +233,6 @@ def read_evidence_bytes(path: str | Path, roots: Iterable[str | Path], *,
     candidate = Path(path)
     if not candidate.is_absolute():
         raise ValueError("absolute_evidence_path_required")
-    _check_name(candidate)
-    resolved = candidate.resolve(strict=True)
-    _check_name(resolved)
-    if exact_path and _parts(resolved) != _parts(candidate):
-        raise ValueError("evidence_source_changed")
     approved = []
     for root in roots:
         try:
@@ -206,8 +243,20 @@ def read_evidence_bytes(path: str | Path, roots: Iterable[str | Path], *,
                 raise ValueError("absolute_workspace_root_required")
             if canonical.is_dir():
                 approved.append(canonical)
-        except (OSError, ValueError, RuntimeError):
+        except (OSError, ValueError, RuntimeError, TypeError):
             continue
+    # Recovery of a previously returned source keeps the whole-path screen.
+    if exact_path:
+        _check_name(candidate)
+    else:
+        _check_below(candidate, approved)
+    resolved = candidate.resolve(strict=True)
+    if exact_path:
+        _check_name(resolved)
+    else:
+        _check_below(resolved, approved)
+    if exact_path and _parts(resolved) != _parts(candidate):
+        raise ValueError("evidence_source_changed")
     if not any(_within(resolved, root) for root in approved):
         raise ValueError("outside_approved_workspace")
     original = os.stat(resolved, follow_symlinks=False)
@@ -215,7 +264,7 @@ def read_evidence_bytes(path: str | Path, roots: Iterable[str | Path], *,
         raise ValueError("evidence_file_limit")
     descriptor = _open_descriptor(resolved)
     try:
-        opened, before_read = _validate_handle(descriptor, resolved, approved, original, max_bytes)
+        opened, before_read = _validate_handle(descriptor, resolved, approved, original, max_bytes, exact_path)
         chunks, length = [], 0
         while length <= max_bytes:
             chunk = os.read(descriptor, min(65536, max_bytes + 1 - length))
@@ -225,7 +274,7 @@ def read_evidence_bytes(path: str | Path, roots: Iterable[str | Path], *,
             length += len(chunk)
         if length > max_bytes:
             raise ValueError("evidence_file_limit")
-        _, after_read = _validate_handle(descriptor, resolved, approved, before_read, max_bytes)
+        _, after_read = _validate_handle(descriptor, resolved, approved, before_read, max_bytes, exact_path)
         if before_read.st_ctime_ns != after_read.st_ctime_ns:
             raise ValueError("evidence_source_changed")
         data = b"".join(chunks)

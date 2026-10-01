@@ -15,6 +15,16 @@ No benchmark grade, permission boundary, completion claim or memory mutation sho
 
 For memory integrations, prefer `assess_memory_relation` and `assess_memory_relevance` over the compatibility string classifier. They return null unknown judgments with complete advice metadata and enforce bounded excerpts without truncation. Python command/completion helpers also reject stale decisions on failed, offline, heuristic, fallback or mismatched batches. The [memory-system guide](MEMORY_SYSTEMS.md) explains the optional Engraphis question bridge and its unknown Noul-confidence limitation.
 
+## Review changes before merge (2026-09-30)
+
+- Generated harness entries on macOS/Linux now reference the virtual environment's own interpreter instead of the resolved base Python. Re-run `jev harness install --target NAME --apply` for any entry created by an earlier 0.3 build. The installer reports it as an update.
+- `JevClient(api_key=...)` works before `jev setup` and explicitly opts in with the default daily cap. Ambient `TYPESAFE_API_KEY`/`JEV_API_KEY` values do not enable fresh default clients or hooks. A saved configuration, including a disabled one, still wins. The CLI and MCP server stay offline until setup.
+- Python accepts plain `{id, type, instructions, criteria}` question objects, as MCP and the CLI already did. TypeScript accepts its typed questions or the native ID-keyed map; convert the shared array as shown in [MEMORY_SYSTEMS.md](MEMORY_SYSTEMS.md).
+- `guard_bash_command` asks with explicit category and risk criteria and returns `category_probabilities`.
+- New `jev hook run|config` for escalate-only pre-execution shell guarding ([HOOKS.md](HOOKS.md)).
+- Unexpanded environment placeholders are absent credentials. Claude Code entries use `${NAME:-}`.
+- Evidence reads screen generic private names below the approved workspace root. Known credential directories, files, encrypted stores and Windows streams remain denied across the entire path, including the root itself. Approved roots cannot be redirected to grant access elsewhere.
+
 ## Portable runtime v2 and evidence API changes
 
 New installations load offline until `jev setup` records an explicit choice. Setup offers DPAPI, optional OS keyring, or an environment reference; UTC is the new portable timezone default. Budgets are operator-selected finite nonnegative amounts, with zero disabling requests. Core/CLI installation supports Python 3.9; install the optional `mcp` extra on Python 3.10+ for the official SDK v2 adapter.

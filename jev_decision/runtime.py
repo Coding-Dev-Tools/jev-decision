@@ -114,7 +114,7 @@ class RuntimeConfig:
             raise RuntimeConfigError("Unsupported credential source")
         if not isinstance(self.key_env, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", self.key_env):
             raise RuntimeConfigError("Invalid credential environment variable name")
-        if self.key_env.upper() in {"JEV_HOME", "JEV_ENDPOINT_URL", "JEV_OFFLINE_MODE"}:
+        if self.key_env.upper() in {"JEV_HOME", "JEV_ENDPOINT_URL", "JEV_OFFLINE_MODE", "JEV_HOOK", "JEV_HOOK_THRESHOLD"}:
             raise RuntimeConfigError("Credential environment variable conflicts with Jev runtime settings")
         if not isinstance(self.selection_mode, str) or self.selection_mode not in {"off", "shadow", "select"}:
             raise RuntimeConfigError("Unsupported evidence selection mode")

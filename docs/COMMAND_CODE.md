@@ -1,4 +1,11 @@
-# Command Code: read saved output before loading it
+# Command Code: guard shell commands and read saved output before loading it
+
+Quick path, after `jev setup`:
+
+```sh
+jev harness install --target command-code --apply   # jev MCP server + /jev-advice skill
+jev hook config command-code                         # optional pre-execution shell guard (merge into settings.json)
+```
 
 The Command Code integration installs a focused, explicitly invoked `/jev-advice` skill and the `jev` MCP entry. It guides the agent to read approved saved logs through `jev_read_evidence` before those logs enter model context. Installation and `off` reads make no Jev provider requests. Shadow scoring and qualified selection require separate operator opt-in; no startup or post-tool hook runs inference automatically.
 
@@ -28,7 +35,7 @@ Command Code's private local scope can override project and user MCP entries. Pr
 
 If the shared project's `jev` entry is already managed for Claude Code, Command Code installation/restoration reports `shared_client_ownership_conflict`; the reverse order is also protected. Use user scope for independent client configurations, or have the operator reconcile a shared entry. An external edit to an owned entry remains a conflict rather than being silently restored.
 
-The generated entry binds an absolute interpreter and `JEV_HOME`. An environment credential uses `${TYPESAFE_API_KEY:-}` (or your selected variable name), never its value. The empty fallback allows credential-free off reads. Supply the real variable in the client launch environment only when enabling provider use, or choose the supported OS vault in `jev setup`. Use a dedicated credential name; `JEV_HOME`, `JEV_ENDPOINT_URL` and `JEV_OFFLINE_MODE` are reserved runtime variables. The installed skill's CLI command also binds the absolute runtime home.
+The generated entry binds an absolute interpreter and `JEV_HOME`. An environment credential uses `${TYPESAFE_API_KEY:-}` (or your selected variable name), never its value. The empty fallback allows credential-free off reads. Supply the real variable in the client launch environment only when enabling provider use, or choose the supported OS vault in `jev setup`. Use a dedicated credential name; `JEV_HOME`, `JEV_ENDPOINT_URL`, `JEV_OFFLINE_MODE`, `JEV_HOOK` and `JEV_HOOK_THRESHOLD` are reserved runtime variables. The installed skill's CLI command also binds the absolute runtime home.
 
 To restore the user integration above, preview first, then apply:
 
@@ -79,11 +86,20 @@ For a Command Code agent using Engraphis alongside Jev, recall authorized contex
 
 Keep `source_sha256` and page metadata. Retrieve an omitted or later range with `--mode off --start-line N --max-lines M --expected-source-sha256 HASH`. Read errors, contradictions, exit status, and any required unread tail before concluding. A redacted or selected page is advisory evidence, never authorization or a replacement for executed verification. See [evidence behavior](EVIDENCE.md) for fallback and recovery details.
 
-## Why this uses a skill
+## Guard shell commands (optional)
+
+Command Code runs `PreToolUse` hooks from `~/.commandcode/settings.json` or `.commandcode/settings.json`. `jev hook config command-code` prints matcher `^(shell|powershell)$`, covering `shell_command` and the native Windows `powershell` tool through their case-insensitive display names. Merge the fragment into the existing `hooks` object and reload.
+
+Command Code hooks can allow or deny but cannot ask. So in `bypass` and `dont-ask` sessions, where nobody reviews commands, the guard **denies** a command Jev flags as destructive or sensitive and gives the agent the reason. In other modes it stays silent, so your approval prompt keeps the decision. Add `--when always` to the hook command to deny flagged commands in every mode. The guard never approves anything, skips plain read-only commands without a request, and on any local failure produces no decision. `JEV_HOOK=off` disables it. Details and the other harnesses are in [HOOKS.md](HOOKS.md).
+
+## Why saved-output reading uses a skill
 
 The current [mod contract](https://commandcode.ai/docs/mods#hooks-and-events) exposes `afterToolCall`, which can replace the result before it is committed to model context. That is a plausible future adapter, but a generic tool result does not establish the immutable source, approved upload scope, matching workload identity, and qualified omission policy this runtime requires. Mods are unsandboxed trusted code and their API is experimental. This integration instead exposes an explicit saved-artifact workflow through existing tools; it adds no permission grants, automatic retries, or event hooks.
 
-## Evidence checked on 2026-09-28
+## Evidence checked on 2026-09-28 and 2026-09-30
+
+On 2026-09-30 the published `command-code` 1.72.4 package (`dist/cli.mjs`) was inspected read-only for the hook runner. A `hookSpecificOutput.permissionDecision` of `deny` blocks the tool. Matchers compile with `new RegExp(pattern, "i")` against display names. Plan mode skips tool hooks. `shell_command` input is passed through unchanged as `command`, `args` and `cwd`. MCP locations, `${NAME:-}` expansion and `disable-model-invocation` are unchanged from 1.66.0.
+
 
 The locally installed npm package reported **`command-code` 1.66.0** in its `package.json`. Read-only inspection of its bundled skill/MCP/mod references and `dist/cli.mjs` confirmed the manual-only skill field and `${NAME:-}` stdio environment expansion. The package's skill catalog and MCP paths match the current official documentation above.
 

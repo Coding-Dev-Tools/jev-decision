@@ -1,29 +1,14 @@
-## Merge-readiness review: harness fixes, pre-execution guard, quickstart
+Jev v0.3 gives Python, TypeScript, CLI and MCP users a portable advisory runtime with explicit setup, protected credentials and bounded requests. Command Code users can capture approved evidence before model ingestion, and memory systems can consume structured advice without handing Jev permission or memory authority.
 
-This adds 14 focused commits on top of `f9ed66c`. Full record: [docs/validation/release-review-20260930.md](docs/validation/release-review-20260930.md).
+- Enforce pinned provider contracts, redacted wire identifiers, per-caller label restoration, one request deadline and conservative shared Python budget accounting. Missing or anomalous usage remains unknown and reserved. Fresh clients, CLI/MCP processes and hooks stay offline; an explicit library key can opt in before setup, while saved disabled settings always win.
+- Preserve unrelated settings through owned installation/restoration. Command Code ships an explicitly invoked skill, shared-project ownership checks, core capture and Windows-safe argv handling. Generated POSIX launchers retain their environment interpreter; unexpanded credential references count as absent keys.
+- Add bounded `assess_memory_relation` and `assess_memory_relevance` helpers plus a dependency-free Engraphis question bridge. Unknown judgments and confidence remain null. Host consent, scoped routing, deterministic verifiers and memory governance remain authoritative.
+- Read saved evidence through pinned roots and validated opened handles, preserving original bytes, hashes and complete source spans. Credential files and Windows stream aliases are denied globally; redirected roots cannot grant new access. Off/shadow/select policy and workload qualification govern omission; no automatic omission profile ships.
+- Offer optional pre-tool shell hooks for five harnesses. They request a native prompt or deny flagged commands and fail open on unavailable advice. Command Code covers shell and Windows PowerShell. Path-qualified executables, unknown flags and effectful options are assessed; hooks never approve commands.
+- Advertise compact MCP questions while retaining complete backend/native-map compatibility and meaningful-content validation. Keep a single Python version source, task-oriented migration/setup guides, shared memory examples and clean package verification receipts. CI covers Python 3.9–3.14 and Node 22/24 on Windows, macOS and Linux.
 
-### Fixes
+Validation on Windows / Python 3.12.10 with the official MCP SDK 2.2.0: **781 passed, 2 platform-related skips**; TypeScript build and **87 tests passed**; Ruff and Git whitespace checks passed. Clean wheel, source and npm installations run outside the checkout, including packaged memory/bridge/hook/capture/skill checks and legacy/current MCP handshakes, with zero provider requests. Four bounded internal reviewers returned; the parent integrated their actionable findings.
 
-- **High: generated entries were broken on macOS/Linux.** They used `Path(sys.executable).resolve()`, which turns a venv, pipx or uv interpreter (`bin/python` is a symlink) into the base Python, and that interpreter cannot import `jev_decision`. Every generated MCP entry and skill command failed with `No module named jev_decision`. POSIX now keeps the unresolved path; Windows keeps its resolved path for MSIX. `check_packages.py` now launches the generated interpreter.
-- **Library opt-in.** `JevClient(api_key=...)`, or `JevClient()` with `TYPESAFE_API_KEY` set, returned `runtime_disabled` before `jev setup`. A key passed to the library now opts in with the default daily cap. The CLI and MCP still stay offline until setup.
-- **Claude Code `${VAR}`.** An unset variable was passed through as literal text, accepted as a key, and left a budget hold on every call. Claude Code entries now use `${VAR:-}`, and any unexpanded placeholder counts as an absent key in Python and TypeScript.
-- **Evidence name screen.** The screen ran over the whole absolute path, so projects under directories like `auth-service/` refused every read. It now applies only below the approved root.
-- **Guard prompt.** The guard's Choice and Noul questions now give each option explicit criteria, following provider guidance and matching the TypeScript guard. The result adds `category_probabilities`.
-- **Smaller fixes.** CLI hints for a fresh install or a zero budget, a single version source, and Python accepts plain `{id, type, instructions, criteria}` objects.
+This PR includes the current checkout's changes, all 14 commits from `review/merge-ready`, and the applicable safeguards from the preserved older worktree. Its remaining edits are superseded by the current contracts and remain untouched in that worktree. The [combined review record](https://github.com/Coding-Dev-Tools/jev-decision/blob/codex/jev-harness-integration/docs/validation/command-code-memory-20261001.md) explains the reconciliation and evidence boundaries.
 
-### Harness integration
-
-- **New `jev hook run|config`.** An escalate-only pre-tool shell guard for Claude Code, Command Code, Codex, Cursor and Gemini CLI. It returns `ask` where the hook supports it; elsewhere it returns `deny`, by default only in no-prompt sessions. It never returns `allow`, skips simple in-project read-only commands, and always exits 0 with no decision on any local failure. Command Code behavior was checked against the `command-code` 1.72.4 hook runner. See [docs/HOOKS.md](docs/HOOKS.md).
-- **Compact MCP schema.** `jev_decide` advertises a 2.7 KB input schema instead of 6.5 KB, saving about 960 model tokens per request in clients that send every schema. The server still validates the full schema.
-- **Docs.** The README is now a four-step quickstart with a harness table. The Command Code guide has a new guard section.
-
-### Validation
-
-- Python 3.10, 3.11, 3.12, 3.13, 3.14.7: 645 passed, 3 skipped. Python 3.9: 627 passed, 21 skipped.
-- TypeScript: 86 passed, plus a clean `check:package` install.
-- Ruff and `git diff --check` pass.
-- `scripts/check_packages.py` passes, including the generated-interpreter probe.
-- End to end: `uv tool install` → `jev setup` → `jev harness install --target claude-code --scope project` → MCP handshake through the generated `.mcp.json` entry returns 6 tools. On the same setup, the old resolved interpreter fails with `ModuleNotFoundError`.
-- CI now also runs Python 3.14 and Node 24.
-
-Windows and macOS were not run locally, so please read this head's CI before merging. No provider calls were made.
+These local/package checks do not establish authenticated provider operation, named-client live usability, improved recall or token/time/billing savings. Live evaluation remains separate and budget-authorized. No merge or package publication is included. GitHub CI and review status must be read for this PR's latest head.

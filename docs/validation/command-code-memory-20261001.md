@@ -41,17 +41,33 @@ preserved. These changes have not been merged or published as a release.
 - Evidence reads preserve approved canonical roots; replacing a root with a
   junction/symlink cannot authorize its new target. Reload also rejects a saved
   root that resolves elsewhere. Existing descriptor-based race checks remain.
+- The local `review/merge-ready` branch's 14 commits through `22e46de` are
+  integrated with these changes. Generated POSIX entries retain their environment
+  interpreter, package versions share one source, placeholder credentials are
+  absent keys, Python accepts plain question objects and MCP discovery is compact.
+- Optional shell hooks cover five harnesses and fail open on local/provider
+  failures. Command Code includes native Windows PowerShell. Path-qualified
+  executables and unknown/effectful options require assessment; the adapter
+  never approves a command. Hook controls cannot be credential-variable names.
+- Fresh clients and hooks stay offline when only an ambient key is present.
+  Pre-setup library opt-in requires an explicit `api_key` argument; saved disabled
+  settings always win. Compact schemas reject blank IDs/instructions/Choice
+  meanings and duplicate Score levels consistently with backend validation.
+- README installation selects the PR candidate branch, links the shared memory
+  recipe and distinguishes the TypeScript map conversion. Hook documentation
+  avoids unsupported fixed latency, cost, token-savings and calibration claims.
 
 ## Verification
 
 On Windows with Python 3.12.10 and the optional official MCP SDK 2.2.0:
 
-- Full Python suite: **682 passed, 1 skipped**. The sole skip requires Windows
-  symlink privilege; directory-junction safeguards and other file checks ran.
+- Full Python suite: **781 passed, 2 skipped**. One requires Windows symlink
+  privilege; the other checks POSIX venv interpreter symlinks. Directory-junction
+  safeguards and the other file checks ran.
 - TypeScript build and client suite: **87 passed**, no skips.
 - Full configured Ruff checks and `git diff --check`: passed.
 - Clean wheel and source installs outside the checkout: passed core imports,
-  offline memory helpers, bridge refusal, packaged Command Code skill/capture,
+  offline memory helpers, bridge refusal, offline shell hooks, packaged Command Code skill/capture,
   and legacy/current (`2026-07-28`) official MCP subprocesses.
 - Clean npm archive installation and offline execution: passed.
 - Local guide links resolve. The native JSON example uses all three canonical
@@ -75,6 +91,8 @@ rechecks covered injected metadata, redaction, evidence scoring and root scope.
 The existing older worktree at `2c321a9` was inspected without changing its files.
 Its tracked patch and untracked MCP schema test were additionally preserved in a
 local archive. The current root's updates are delivered together in PR #1.
+The separate `review/merge-ready` branch was merged with its commit history;
+overlapping contracts were reconciled against the combined source and tests.
 
 | Older changes | Disposition in the current PR |
 | --- | --- |

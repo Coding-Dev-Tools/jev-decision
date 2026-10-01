@@ -24,10 +24,12 @@ import urllib.error
 import urllib.request
 import uuid
 from collections import OrderedDict
+from dataclasses import replace
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Union
 
+from ._version import __version__
 from .jsonutil import json_equal
 from .primitives import (
     ChoiceDecision,
@@ -101,6 +103,23 @@ def _description(value: Any) -> bool:
     return False
 
 
+_TYPED_FIELDS = frozenset({"id", "type", "prompt", "instructions", "options", "scale", "criteria"})
+
+
+def _typed_question(item: Dict[str, Any]) -> Any:
+    """Plain ``{"id", "type", "instructions", ...}`` objects, as in MCP/CLI and TypeScript."""
+    if not set(item) <= _TYPED_FIELDS or not isinstance(item.get("id"), str):
+        raise ValueError("invalid_question")
+    kind, prompt = item.get("type"), item.get("instructions", item.get("prompt"))
+    if kind == "noul":
+        return NoulQuestion(item["id"], prompt, criteria=item.get("criteria"))
+    if kind == "choice":
+        return ChoiceQuestion(item["id"], prompt, options=item.get("options"), criteria=item.get("criteria"))
+    if kind == "score":
+        return ScoreQuestion(item["id"], prompt, scale=item.get("scale"), criteria=item.get("criteria"))
+    raise ValueError("invalid_question_type")
+
+
 def normalize_questions(questions: Any) -> Dict[str, Any]:
     """Return native questions; invalid caller data raises a content-free ValueError."""
     try:
@@ -109,6 +128,8 @@ def normalize_questions(questions: Any) -> Dict[str, Any]:
         elif isinstance(questions, (list, tuple)):
             native = {}
             for question in questions:
+                if isinstance(question, dict):
+                    question = _typed_question(question)
                 if not isinstance(question, (NoulQuestion, ChoiceQuestion, ScoreQuestion)):
                     raise ValueError("invalid_question")
                 if not _text(question.id) or question.id in native:
@@ -466,6 +487,21 @@ def _http_error(status: int) -> Tuple[str, bool]:
     return "provider_error", status in (500, 502, 503, 504, 529)
 
 
+def _library_opt_in(config: Any, api_key: Optional[str]) -> bool:
+    """Whether direct library construction before any ``jev setup`` has opted in.
+
+    Supplying an explicit ``api_key`` argument to a library client is an
+    explicit choice to call the provider; the default
+    daily budget and shared ledger still apply. Harness processes (CLI, MCP)
+    pass their saved runtime explicitly and stay offline until setup, and a
+    saved configuration (including a disabled one) is always respected.
+    """
+    if getattr(config, "setup_complete", True) or config.config_path.exists():
+        return False
+    # An inherited environment key is availability, not fresh authorization.
+    return api_key is not None and bool(api_key)
+
+
 class JevClient:
     """Shared-policy client. Provider failures preserve the normal LLM workflow."""
 
@@ -505,6 +541,8 @@ class JevClient:
             from .runtime import RuntimeConfig
 
             self._runtime = runtime or RuntimeConfig.load()
+            if runtime is None and _library_opt_in(self._runtime, api_key):
+                self._runtime = replace(self._runtime, enabled=True)
             if not isinstance(self._runtime, RuntimeConfig):
                 raise ValueError("invalid_runtime_config")
             self.model = model or self._runtime.model
@@ -683,7 +721,7 @@ class JevClient:
                 self.base_url, data=body, method="POST",
                 headers={"Authorization": "Bearer " + self._api_key,
                          "Content-Type": "application/json", "Accept": "application/json",
-                         "User-Agent": "jev-decision-python/0.3.0"},
+                         "User-Agent": "jev-decision-python/" + __version__},
             )
             error, retryable, known_tokens = None, False, None
             usage: Dict[str, Optional[int]] = {"input_tokens": None, "output_tokens": None}

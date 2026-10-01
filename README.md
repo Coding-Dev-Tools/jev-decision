@@ -1,125 +1,150 @@
-# Jev Decision 0.3.0
+# Jev Decision
 
-Portable, selective [TypeSafe Jev](https://docs.typesafe.ai/api) advice for Python, TypeScript, JSON CLI, and MCP clients. Use small semantic classifications, relevance assessments, routing hints, and verification-gap checks when they can improve a task. Native permissions and executable verification remain authoritative.
+[![CI](https://github.com/Coding-Dev-Tools/jev-decision/actions/workflows/ci.yml/badge.svg)](https://github.com/Coding-Dev-Tools/jev-decision/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**No workload ships qualified for automatic omission.** Savings depend on the source, primary model, harness, and task. This release supplies measurement and qualification tools, with an [offline integration report](docs/validation/portable-offline.json), rather than a universal savings percentage.
+Fast, typed, budgeted [TypeSafe Jev](https://docs.typesafe.ai/api) decisions for coding-agent harnesses: Command Code, Claude Code, Codex, Cursor, Gemini CLI, Antigravity, OpenCode, and any MCP or shell-capable client.
 
-## Install and choose a setup
+Jev is a "System 1" model: it returns typed probabilities for yes/no (Noul), multiple-choice (Choice), and rubric (Score) questions. This repository provides a portable client, a shared Python budget ledger, and optional harness and memory-system recipes. Quality, latency and net savings depend on the workload and need separate measurement.
 
-From a reviewed checkout, install a built package into your own virtual environment:
+**Advice, never authority.** Jev results never grant a permission, approve a command, or certify that a task is complete. Your harness's permission rules and your executed tests stay in charge. Any failure (no key, budget reached, timeout, provider error) returns an explicit `unavailable` result, and your workflow carries on as if Jev were absent.
+
+## Quickstart
+
+### 1. Install
+
+MCP support needs Python 3.10+; the core library and CLI run on 3.9+.
+
+The v0.3 changes are currently reviewed in [PR #1](https://github.com/Coding-Dev-Tools/jev-decision/pull/1). These commands install that development branch; they do not install a published v0.3 release.
 
 ```sh
+# Recommended: an isolated tool install that puts `jev` and `jev-mcp` on PATH
+uv tool install "jev-decision[mcp,setup] @ git+https://github.com/Coding-Dev-Tools/jev-decision@codex/jev-harness-integration"
+
+# Or into a virtual environment you manage
 python -m venv .venv
-# Activate .venv using your shell, then:
-python -m pip install '.[mcp,setup]'
-jev setup
+# Activate on macOS/Linux: . .venv/bin/activate
+# Activate on PowerShell: .\.venv\Scripts\Activate.ps1
+python -m pip install "jev-decision[mcp,setup] @ git+https://github.com/Coding-Dev-Tools/jev-decision@codex/jev-harness-integration"
 ```
 
-Core Python and the JSON CLI support Python 3.9+. MCP uses the optional official Python SDK v2 and requires Python 3.10+. The `setup` extra adds OS credential storage and portable timezone data. Core-only installation is `python -m pip install .`. The TypeScript package requires Node 20+; [its API](ts/README.md) is explicit and does not share the Python budget ledger.
+`setup` adds OS credential storage and timezone data. Generated harness entries point at this exact interpreter, so keep the environment in place after installing.
 
-Fresh installations stay offline until setup. Setup asks for a credential source, approved evidence roots, daily budget, timezone, and selected harness. Zero budget keeps requests disabled; UTC is the portable default. For a headless environment, reference a variable name rather than putting a key in a command:
+### 2. Configure a key and a daily budget
+
+A fresh install makes **no** provider calls until you run setup.
 
 ```sh
-jev setup --non-interactive --credential-source env --key-env TYPESAFE_API_KEY --daily-budget 0.25 --timezone UTC --workspace /absolute/project --harness codex --scope user
-jev harness install --target codex --dry-run
-jev harness install --target codex --apply
-jev doctor --json
+jev setup            # interactive: key source, daily budget, workspace, harness
+jev doctor --live    # one tiny budgeted request that checks authentication
 ```
 
-Set the referenced variable privately in the harness launch environment. Windows supports CurrentUser DPAPI; macOS Keychain and Linux Secret Service are available through the optional `keyring` backend. `jev auth set` uses masked local input. Windows also offers `jev auth set --gui`. Environment references are the alternative for headless machines without an unlocked vault. Local status never unlocks a keychain or claims authentication.
+`jev setup` stores the key in Windows DPAPI or the macOS/Linux keychain. It never writes the key to a config file. On headless machines, point setup at an environment variable *name* instead:
 
-The [Windows versioned installer](scripts/install-runtime.ps1) remains available with Python 3.11+. It prints an absolute installed Python path; use `& $jevPython -I -m jev_decision.cli setup` in PowerShell. Every generated integration binds to the selected runtime home. Keep that home and its ledger when upgrading. [Migration details](docs/MIGRATION_0_3.md).
+```sh
+export TYPESAFE_API_KEY=...   # set this in the harness's launch environment
+jev setup --non-interactive --credential-source env --daily-budget 1 --timezone UTC --workspace "$PWD"
+```
 
-## Select an integration
+A daily budget of `0` keeps requests disabled. Before each request the shared ledger reserves the worst-case cost of that request, so the cap holds across every harness that uses the same runtime.
 
-| Interface | Entry point | Budget/credentials |
+### 3. Connect your harness
+
+Preview the change, apply it, then reload the client:
+
+```sh
+jev harness install --target command-code --dry-run
+jev harness install --target command-code --apply
+```
+
+| Harness | `--target` | What gets installed |
 | --- | --- | --- |
-| Python | `from jev_decision import JevClient` | Shared managed runtime by default |
-| JSON CLI | `jev decide --file request.json` | Same runtime |
-| MCP stdio | `python -I -m jev_decision.mcp` or `jev-mcp` | Same runtime; optional SDK |
-| TypeScript | `@coding-dev-tools/jev-decision` | Explicit key and application-owned budget |
+| Command Code | `command-code` | `jev` MCP server plus the `/jev-advice` skill ([guide](docs/COMMAND_CODE.md)) |
+| Claude Code | `claude-code` | MCP server and skill |
+| Codex | `codex` | `[mcp_servers.jev]` and skill |
+| Cursor | `cursor` | MCP server and skill |
+| Gemini CLI | `gemini-cli` | MCP server and skill |
+| Antigravity CLI / IDE | `antigravity`, `antigravity-ide` | MCP server and skill |
+| OpenCode | `opencode` | MCP server and skill |
+| Claude Desktop, Crush | `claude-desktop`, `crush` | MCP server |
+| Pi, Hermes, OMP, OpenClaude, Copilot | `pi`, `hermes`, `omp`, `openclaude`, `copilot` | CLI-based skill |
 
-The [support matrix and recipes](docs/INTEGRATIONS.md) cover Codex, Claude Code/Desktop, Cursor, Gemini CLI, Antigravity, OpenCode, existing skill clients, and generic MCP/CLI clients. Configuration tests and protocol tests are separate from live client verification. No new live client/version support claim is made by this release's offline suite.
+Add `--scope project --project-root /abs/project` for a project-level configuration where the harness supports one. `jev harness restore --target NAME --apply` removes only what Jev added and reports any entries you changed yourself. File locations and verification status are in the [integration matrix](docs/INTEGRATIONS.md).
 
-Command Code users can follow the [dedicated guide](docs/COMMAND_CODE.md) for the optional `/jev-advice` skill, project configuration, and capture-before-reading workflow.
+### 4. Optional: guard shell commands before they run
 
-Engraphis and other memory systems can use [structured memory advice and the optional injected-client bridge](docs/MEMORY_SYSTEMS.md). Relation and batched relevance helpers retain uncertainty and provider/cache metadata; the host keeps control of memory access, retrieval and writes. The [native memory example](examples/memory-advice.json) also works with JSON CLI, MCP and TypeScript.
-
-Install or restore only the selected target. Project scopes are supported where the client has a documented project configuration:
+The optional pre-tool hook can assess a shell command before it runs:
 
 ```sh
-jev harness install --target cursor --scope project --project-root /absolute/project --dry-run
-jev harness install --target cursor --scope project --project-root /absolute/project --apply
-jev harness restore --target cursor --scope project --project-root /absolute/project
-# Add --apply to execute the matching restoration.
+jev hook config claude-code     # prints the exact JSON to merge into your settings
 ```
 
-Restoration preserves unrelated entries and reports user-modified conflicts. Existing clients need a reload. `doctor --live` sends one budgeted synthetic request and verifies provider authentication only; it does not prove the named harness invoked Jev.
+The hook is **escalate-only**. It can force the harness's normal approval prompt (Claude Code, Cursor), or block a flagged command with a reason (Command Code, Codex, Gemini CLI). By default it blocks only in sessions that run without approval prompts. It never approves anything. Simple read-only commands such as `ls` or `git status` skip the request. Any local failure leaves the harness unchanged, and `JEV_HOOK=off` turns the hook off. See [docs/HOOKS.md](docs/HOOKS.md).
 
-## Small, typed decisions
+## Use it from code
 
 ```python
 from jev_decision import JevClient
 
-client = JevClient()  # Loads the explicitly configured managed runtime.
+client = JevClient()  # uses the saved `jev setup` runtime; fresh defaults stay offline
 batch = client.evaluate(
     {"request": "Export needs a preview before downloading."},
-    {"intent": {"type": "choice", "instructions": "Classify the requested change.",
-                "criteria": {"feature": "New behavior", "bug": "Broken existing behavior", "unclear": None}}},
+    [{"id": "intent", "type": "choice", "instructions": "Classify the requested change.",
+      "criteria": {"feature": "Adds new behavior", "bug": "Fixes broken existing behavior", "unclear": None}}],
 )
 if batch.status == "ok":
-    print(batch.get_choice("intent").selected)  # Advice, not permission.
+    print(batch.get_choice("intent").selected, batch.get_choice("intent").probabilities)
 else:
-    print(batch.status, batch.error_code)        # Continue the normal workflow.
+    print(batch.status, batch.error_code)   # carry on without Jev
 ```
 
-Runnable JSON examples: [classification](examples/classify.json), [evidence relevance](examples/relevance.json), [routing](examples/route.json), and [verification gaps](examples/verification-gap.json). Run `jev decide --file examples/route.json` after setup. Skip Jev when a deterministic rule or test already answers the question.
+The native ID-keyed map (`{"intent": {"type": "choice", ...}}`) and the typed `NoulQuestion`/`ChoiceQuestion`/`ScoreQuestion` classes also work. Ready-made helpers include `guard_bash_command`, `verify_turn_completion`, `assess_memory_relation`, `assess_memory_relevance`, and `prune_tool_output`. Constructing `JevClient(api_key=...)` before any saved configuration explicitly opts in with the default $1/day cap on the shared ledger. Ambient environment keys do not enable fresh default clients or hooks; saved configuration always wins.
 
-Use non-sensitive question IDs and Choice labels. Recognizable secrets in Python IDs and labels are redacted before transmission, and redaction collisions reject the request. Successful results restore the caller's original IDs and labels, including cached results; those values are intentionally part of the local result. TypeScript sanitizes question IDs; applications own body and criterion sanitization.
+The [memory-system guide](docs/MEMORY_SYSTEMS.md) and [native JSON recipe](examples/memory-advice.json) cover scoped memory assessments and the optional Engraphis question bridge. Memory writes and evidence omission remain governed by the caller.
 
-Choice supports native null descriptions. Score uses 2–10 ordered descriptive levels and preserves fractional values and legends. Noul returns a probability; separate confidence is unknown. Missing usage stays `null`. Python and TypeScript share contract fixtures, including valid provider probability rounding.
+From a shell or any harness without MCP, run `jev decide --file request.json` (see [examples](examples/)). TypeScript users have an explicit-key client in [`ts/`](ts/README.md). It uses the same wire contract, but the Python budget ledger does not cover its calls.
 
-## Evidence before model ingestion
+### MCP tools
 
-Capture output to original artifacts first, then return references to the agent. [Complete PowerShell/POSIX examples](docs/EVIDENCE.md) preserve stdout, stderr, and producer exit status. Sending a log to the primary model and then asking Jev to shorten it cannot reclaim tokens already consumed.
-
-The installed package includes capture; it needs no Jev setup or credential:
-
-```sh
-jev capture --directory /absolute/project/.evidence/run-001 -- python -X utf8 -m pytest
-```
-
-This explicitly runs the supplied producer under the shell user's permissions, saves both streams, returns only a manifest reference, and preserves the producer's exit status. Use a new directory for each run. MCP remains advisory and never launches producers.
-
-| Mode | Behavior |
+| Tool | Purpose |
 | --- | --- |
-| `off` | Redacted evidence and recovery references; zero Jev calls |
-| `shadow` | Score eligible spans; retain all evidence and measure overhead |
-| `select` | Omit only with a locally configured qualified profile and matching workload identity |
+| `jev_decide` | Batch of typed Noul/Choice/Score questions over one state |
+| `jev_guard_command` | Risk category and probability for a shell command (advisory) |
+| `jev_verify_completion` | Gaps between a goal and the supplied verification evidence |
+| `jev_read_evidence` | Read a saved log page by page, with source hashes and line references |
+| `jev_prune_output` | Relevance measurement for text already in context |
+| `jev_status` | Local configuration and budget, with no network call |
 
-The saved runtime mode is a ceiling: CLI/MCP callers can request a less active mode, but cannot turn an `off` runtime into `shadow` or `select`. An omitted per-call mode always means `off`, including when the saved mode allows scoring. After initial setup, opt into measurement with `jev setup --non-interactive --selection-mode shadow` and restart existing Jev server processes. Setup itself makes no provider call. Use `--selection-mode off` to disable scoring again; a retained profile cannot override that choice. A mode-only update preserves the runtime's enabled state and other settings, even if its saved project or credential backend is unavailable.
+### Getting good answers
 
-`jev evidence --file /absolute/project/run/stdout.log --goal 'Find the failure cause' --mode shadow --json` then reads an approved source in measurement mode. Recover another page with `--start-line`, `--max-lines`, and `--expected-source-sha256`. Originals stay user-owned. Changed hashes reject recovery, and redaction preserves original line numbers.
+Follow the provider's [Jev 1.13 guidance](https://docs.typesafe.ai/model-jaggedness/jev-1.13):
 
-Small inputs, fully protected output, unknown formats, and unavailable providers retain evidence. Supported records are grouped before scoring; tracebacks, test summaries, diff hunks, warnings, statuses, and adjacent context remain protected. Initial limits are 16 questions / about 16 KiB per batch, two concurrent requests, and five seconds for the selection operation. Unprocessed spans remain available. These are engineering bounds, not demonstrated optimal settings.
+- **Batch** related questions into one call. Extra questions add little latency.
+- **Describe every option.** Give Choice labels and Score levels explicit meanings and boundary conditions.
+- **Send only the relevant state.** Unrelated text acts as a distractor.
+- **Keep deterministic work in code:** arithmetic, counting, date comparisons, parsing, and exit codes.
+- **Calibrate thresholds for each question** on your own data. Don't reuse one question's threshold for another.
 
-## Accounting and qualification
+## Evidence capture and selection
 
-The managed runtime pins `jev-1.13.0`, sends only to the official HTTPS endpoint, reserves worst-case cost before each attempt, and permits at most one transient retry within the deadline. Budget reservation and settlement share that deadline. Crashes, unknown usage, and unfinished settlement retain conservative reservations. Timezone changes preserve the active accounting period. Separate runtime homes or standalone SDK calls have separate budgets.
+A large log only saves context tokens if it never enters the model's context. `jev capture --directory /abs/new-dir -- pytest` runs the command and saves stdout, stderr, hashes, and the exit status. It prints only a small reference. `jev evidence` / `jev_read_evidence` then pages through the saved file inside approved workspace roots, with secrets redacted and original line numbers preserved.
 
-[Evaluation instructions](docs/EVALUATION.md) compare unchanged output, deterministic-only, shadow, and selection arms. Qualification requires all labeled critical facts, no observed task-success loss, positive net tokens and modeled cost after Jev, and no p95 task-time increase. Reports bind source/label hashes, model/rubric/thresholds, harness versions, independent held-out source groups, cache conditions, and the explicit campaign budget. Inconclusive results stay in measurement mode. Provider usage and modeled cost are not invoices.
+Evidence **selection** (dropping low-relevance log spans) is off by default. **No workload ships qualified for automatic omission.** `shadow` mode measures, and `select` requires a locally qualified profile built with the [evaluation workflow](docs/EVALUATION.md). See [docs/EVIDENCE.md](docs/EVIDENCE.md). Savings depend on your logs, model, and harness, so this project makes no universal savings claim.
 
-## Develop and prepare release artifacts
+## Safety and accounting
+
+- The model (`jev-1.13.0`) and the official HTTPS endpoint are pinned. There is no proxy discovery and no redirect following.
+- Each attempt reserves its worst-case cost in a SQLite ledger shared by every process with the same `JEV_HOME`. There is at most one transient retry within a single deadline.
+- Keys live in DPAPI, the OS keychain, or an environment variable you name. Harness configs contain only variable references. Unexpanded `${NAME}` placeholders are treated as missing keys.
+- Question IDs, labels, and state are scanned for recognizable secrets and redacted before they leave the machine.
+
+## Development
 
 ```sh
-python -m pip install '.[test,mcp,setup]' build
+python -m pip install -e ".[test,mcp,setup]" build
 python -m pytest -q
-python scripts/evaluate_evidence.py --dataset examples/evaluation/dataset.json --offline --output /absolute/new-offline-report.json
-python scripts/check_packages.py --output /absolute/new-release-candidate-directory
-cd ts
-npm ci
-npm test
-npm run check:package
+python scripts/check_packages.py --output /abs/new-dir     # wheel/sdist installed outside the checkout
+cd ts && npm ci && npm test && npm run check:package
 ```
 
-CI tests Python 3.9–3.13 on Windows/macOS/Linux, enables optional MCP tests on supported Python versions, and installs wheel, source, and npm packages outside the checkout. Artifact preparation never publishes or merges. [MIT license](LICENSE) · [runtime contract](docs/SPECIFICATION.md).
+CI runs Python 3.9–3.14 on Windows, macOS and Linux, plus Node 22 and 24. [Migration from 0.2](docs/MIGRATION_0_3.md) · [Runtime contract](docs/SPECIFICATION.md) · [Validation records](docs/validation/README.md) · [MIT license](LICENSE)
