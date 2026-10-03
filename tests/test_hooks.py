@@ -1,6 +1,7 @@
 """Escalate-only harness hook adapter; no provider calls and no real clients."""
 import io
 import json
+from pathlib import Path
 
 import pytest
 
@@ -199,3 +200,72 @@ def test_guard_sends_descriptive_criteria_and_reports_category_probabilities(tmp
     assert result["status"] == "ok" and result["risk_category"] == "destructive_or_sensitive"
     assert result["category_probabilities"]["destructive_or_sensitive"] == 0.8
     assert result["risk_probability"] == 0.7 and result["permission_authority"] == "native_harness"
+
+
+@pytest.mark.parametrize("command", [
+    "cat %USERPROFILE%/Documents/taxes.pdf",
+    "ls %CD%",
+    "echo %PATH%",
+    "dir %TEMP%",
+    "type %APPDATA%\\config.txt",
+    "cat $env:TEMP/secret.txt",
+])
+def test_windows_environment_expansion_defeats_the_read_only_fast_path(command):
+    """``%VAR%`` expands before the command runs, so a relative-looking word is not relative."""
+    assert hooks.is_plainly_read_only(command) is False
+
+
+@pytest.mark.parametrize("command", ['grep "100%" README.md', "ls 50%.txt", "date +%Y",
+                                    "echo 100%", "cat progress-90%.log"])
+def test_literal_percent_does_not_defeat_the_read_only_fast_path(command):
+    """Only a paired ``%NAME%`` expands; a literal percent is ordinary text.
+
+    Sending these to the provider would put a 3s synchronous call in the
+    pre-execution hot path for routine inspection commands.
+    """
+    assert hooks.is_plainly_read_only(command) is True
+
+
+@pytest.mark.parametrize("command", ["ls -la", "git status", "cat README.md", "rg -n pattern",
+                                    "wc -l file", "git log --oneline -5", "pwd"])
+def test_genuinely_read_only_commands_stay_on_the_fast_path(command):
+    assert hooks.is_plainly_read_only(command) is True
+
+
+def test_non_string_arguments_are_not_silently_discarded():
+    """Assessing a shorter command than the one that runs would hide a destructive tail."""
+    payload = {"tool_name": "shell_command",
+               "tool_input": {"command": "echo", "args": [1, "&&", "rm", "-rf", "/"]}}
+    command, _ = hooks.extract_command("command-code", payload)
+    assert "rm -rf" in command
+    assert hooks.is_plainly_read_only(command) is False
+
+
+@pytest.mark.parametrize("mode", ["bypassPermissions", "bypass-permissions", "bypass_permissions",
+                                  "BYPASS", "yolo", "dont-ask", "dontAsk"])
+def test_hyphenated_unattended_modes_are_recognized(mode):
+    client = FakeGuardClient()
+    payload = dict(PAYLOADS["command-code"], permission_mode=mode)
+    assert hooks.evaluate_hook("command-code", payload, client=client) is not None
+
+
+def test_advisory_mode_stays_silent_in_an_attended_session():
+    client = FakeGuardClient()
+    payload = dict(PAYLOADS["command-code"], permission_mode="default")
+    assert hooks.evaluate_hook("command-code", payload, client=client) is None
+    assert client.calls == []
+
+
+def test_hook_config_matcher_and_parser_agree_for_command_code():
+    """Command Code matches on display names; the guard parses raw tool names."""
+    import re
+    fragment = hooks.hook_config("command-code", runtime_home=Path("/tmp/jev"), python="/usr/bin/python3")
+    matcher = fragment["fragment"]["hooks"]["PreToolUse"][0]["matcher"]
+    # command-code 1.72.4: new RegExp(pattern, "i") tested against toToolDisplayName.
+    display_names = {"shell_command": "SHELL", "powershell": "POWERSHELL"}
+    for tool_name, display in display_names.items():
+        assert re.search(matcher, display, re.I), f"matcher {matcher!r} does not fire for {tool_name}"
+        payload = {"tool_name": tool_name, "tool_input": {"command": "rm -rf build"}}
+        assert hooks.extract_command("command-code", payload)[0] == "rm -rf build"
+    for unrelated in ("kill_shell", "bash_output", "read_file", "cron_create"):
+        assert not re.search(matcher, unrelated.upper(), re.I)

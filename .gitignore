@@ -14,3 +14,5 @@ ts/node_modules/
 ts/dist/
 ts/*.tgz
 .coverage
+# Local agent scratch output; never part of a release.
+Claude outputs/

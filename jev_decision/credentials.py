@@ -103,10 +103,29 @@ def _restrict_acl(path: Path, *, directory: bool) -> None:
 # {env:NAME}, $NAME or %NAME%. Some clients pass an unset reference through as
 # literal text; such a placeholder is an absent credential, never a key.
 _PLACEHOLDER = re.compile(r"\$\{[^{}]*\}|\{env:[^{}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%")
+# Values a user leaves behind while setting an environment credential. They pass
+# the printable-ASCII check but are never a usable key, so storing one leaves a
+# broken credential that reports itself as present.
+_PLACEHOLDER_LITERALS = frozenset({
+    "...", "-", "--", "changeme", "change-me", "change_me", "your-api-key",
+    "your_api_key", "your-api-key-here", "yourkey", "your-key", "your_key",
+    "yourkeyhere", "placeholder", "example", "sample", "dummy", "todo", "tbd",
+    "none", "null", "nil", "undefined", "xxx", "xxxx", "test-key", "testkey",
+})
+# The same set with separators removed, so "change-me", "change_me" and
+# "changeme" all collapse to one spelling.
+_PLACEHOLDER_SPELLINGS = frozenset(
+    item.replace("-", "").replace("_", "") for item in _PLACEHOLDER_LITERALS)
 
 
 def _is_placeholder(value: Any) -> bool:
-    return isinstance(value, str) and _PLACEHOLDER.fullmatch(value.strip()) is not None
+    if not isinstance(value, str):
+        return False
+    stripped = value.strip()
+    if _PLACEHOLDER.fullmatch(stripped) is not None:
+        return True
+    normalized = stripped.lower()
+    return normalized in _PLACEHOLDER_LITERALS or normalized.replace("-", "").replace("_", "") in _PLACEHOLDER_SPELLINGS
 
 
 def _valid_key_format(value: Any) -> bool:

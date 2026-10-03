@@ -205,4 +205,5 @@ class DecisionBatch:
             "request_id": self.request_id,
             "error_code": self.error_code,
             "is_fallback": self.is_fallback,
+            "advisory_only": True,
         }

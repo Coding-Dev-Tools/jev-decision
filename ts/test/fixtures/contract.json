@@ -28,7 +28,8 @@
     "usage": {"input_tokens": 123, "output_tokens": 15},
     "attempts": 1,
     "error_code": null,
-    "is_fallback": false
+    "is_fallback": false,
+  "advisory_only": true
   },
   "expected_unavailable": {
     "status": "unavailable",
@@ -39,7 +40,8 @@
     "usage": {"input_tokens": null, "output_tokens": null},
     "attempts": 1,
     "error_code": "invalid_response",
-    "is_fallback": false
+    "is_fallback": false,
+  "advisory_only": true
   },
   "cases": [
     {"name": "mixed_valid", "patches": [], "expected": "ok"},

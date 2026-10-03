@@ -50,6 +50,10 @@ _READ_OPTIONS = {"ls": {"-l", "-a", "-la", "-al", "-h", "-lh", "-lah"},
                  "wc": {"-l", "-w", "-c", "-m"}, "head": set(), "tail": set()}
 _GIT_READ_OPTIONS = frozenset({"--oneline", "--short", "--porcelain", "--stat", "--name-only", "--name-status"})
 _SHELL_SYNTAX = re.compile(r"[;&|`$<>(){}\n\r\\*?\[\]~!]")
+# cmd.exe and PowerShell expand %NAME% (and $env:NAME) before the command runs, so a
+# "relative" path such as %USERPROFILE%/Documents can leave the working directory. Only a
+# paired reference expands, so a literal percent in a filename or format string is left alone.
+_ENV_EXPANSION = re.compile(r"(?<![%\w])%[A-Za-z_][A-Za-z0-9_]*%|\$env:[A-Za-z_][A-Za-z0-9_]*")
 
 
 class HookInputError(ValueError):
@@ -74,8 +78,13 @@ def extract_command(harness: str, payload: Any) -> Tuple[str, str]:
         if isinstance(command, list) and all(isinstance(item, str) for item in command):
             command = shlex.join(command)
         extra = tool_input.get("args")
-        if isinstance(command, str) and isinstance(extra, list) and all(isinstance(item, str) for item in extra):
-            command = " ".join([command] + [shlex.quote(item) for item in extra])
+        if isinstance(command, str) and isinstance(extra, list):
+            # Never discard arguments the guard cannot quote: assessing a shorter
+            # command than the one that will run would hide a destructive tail.
+            try:
+                command = " ".join([command] + [shlex.quote(str(item)) for item in extra])
+            except (TypeError, ValueError):
+                raise HookInputError("unquotable_command_arguments") from None
         cwd = tool_input.get("cwd") or tool_input.get("directory") or payload.get("cwd", "")
     if not isinstance(command, str) or not command.strip():
         raise HookInputError("missing_command")
@@ -90,7 +99,7 @@ def is_plainly_read_only(command: str) -> bool:
     directory (absolute, drive-qualified or climbing with ``..``) disqualifies
     the command, because reading private data is itself a sensitive effect.
     """
-    if _SHELL_SYNTAX.search(command):
+    if _SHELL_SYNTAX.search(command) or _ENV_EXPANSION.search(command):
         return False
     try:
         words = shlex.split(command)
@@ -149,7 +158,7 @@ def evaluate_hook(harness: str, payload: Any, *, client: Any = None,
     command, cwd = extract_command(harness, payload)
     if harness not in ASK_CAPABLE and when == "unattended":
         mode = payload.get("permission_mode") if isinstance(payload, dict) else None
-        if not isinstance(mode, str) or mode.replace("_", "").lower() not in UNATTENDED_MODES:
+        if not isinstance(mode, str) or mode.replace("_", "").replace("-", "").lower() not in UNATTENDED_MODES:
             return None
     if is_plainly_read_only(command):
         return None

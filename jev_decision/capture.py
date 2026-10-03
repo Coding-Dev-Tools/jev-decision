@@ -26,13 +26,27 @@ def configure_parser(parser):
     parser.add_argument("command", nargs=argparse.REMAINDER, help="-- PROGRAM [ARGS...], without shell expansion")
 
 
+def _windows_batch_executable(executable):
+    """Return ``executable`` when it names a batch script, otherwise ``None``.
+
+    Windows strips trailing dots and spaces from a path before opening it, so
+    ``producer.cmd ``, ``producer.cmd.`` and ``PRODUCER.CMD`` all reach the same
+    batch file through ``cmd.exe``. The spelling is inspected rather than the
+    resolved path so an unresolvable alias cannot slip past the check.
+    """
+    name = executable.rstrip(" .")
+    if Path(name).suffix.lower() in {".cmd", ".bat"}:
+        return executable
+    return None
+
+
 def capture_output(directory, command):
     command = command[1:] if command[:1] == ["--"] else command
     if not command or not Path(directory).is_absolute():
         raise ValueError("absolute_new_directory_and_producer_required")
     if os.name == "nt":
         executable = shutil.which(command[0]) or command[0]
-        if Path(executable).suffix.lower() in {".cmd", ".bat"}:
+        if _windows_batch_executable(executable):
             raise ValueError("batch_producer_requires_explicit_interpreter")
         # Bind the executable we inspected instead of repeating Windows lookup.
         command = [executable, *command[1:]]

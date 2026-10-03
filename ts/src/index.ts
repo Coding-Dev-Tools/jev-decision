@@ -10,6 +10,16 @@ export const DEFAULT_TYPESAFE_ENDPOINT = "https://api.typesafe.ai/v1/systemone";
 export const MAX_REQUEST_BYTES = 24_576;
 export const MAX_RESPONSE_BYTES = 262_144;
 export const MAX_DEADLINE_MS = 5_000;
+/** Below this length a "credential" is indistinguishable from ordinary text. */
+const MIN_CREDENTIAL_SCAN_LENGTH = 12;
+/** Values a user leaves behind while setting a credential; never usable keys. */
+const PLACEHOLDER_LITERALS = new Set([
+  "mock", "offline", "...", "-", "--", "changeme", "change-me", "change_me",
+  "your-api-key", "your_api_key", "your-api-key-here", "yourkey", "your-key",
+  "your_key", "yourkeyhere", "placeholder", "example", "sample", "dummy",
+  "todo", "tbd", "none", "null", "nil", "undefined", "xxx", "xxxx",
+  "test-key", "testkey",
+]);
 const MAX_INPUT_TOKENS = 64_000;
 const PROBABILITY_TOLERANCE = 1e-3;
 const ROUNDING_EPSILON = 1e-12;
@@ -92,6 +102,8 @@ export interface DecisionBatch {
   request_id: string;
   error_code: ErrorCode | null;
   is_fallback: false;
+  /** Advice never grants permission or certifies execution; always true. */
+  advisory_only: true;
 }
 
 class ClientFailure extends Error {
@@ -130,9 +142,12 @@ function assertId(value: unknown): asserts value is string {
 const ID_WHITESPACE = "\\x09-\\x0d\\x1c-\\x20\\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000";
 const ID_WORD = "\\p{L}\\p{N}_";
 const ID_WORD_BOUNDARY = `(?:(?<=[${ID_WORD}])(?![${ID_WORD}])|(?<![${ID_WORD}])(?=[${ID_WORD}]))`;
-const ID_SECRET_NAMES = "typesafe_api_key|jev_api_key|api[_-]?key|api[_-]?token|secret|password|passwd|authorization|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|aws_secret_access_key|_authToken|_auth"
-  .replace(/[iks]/g, letter => ({ i: "[iİı]", k: "[kK]", s: "[sſ]" })[letter]!);
-const ID_URL_USERINFO = new RegExp(`(http[sſ]?://)[^${ID_WHITESPACE}/@]+:[^${ID_WHITESPACE}/@]+@`, "giu");
+const ID_SECRET_NAMES = "typesafe_api_key|jev_api_key|api[_-]?key|api[_-]?token|secret|password|passwd|passphrase|authorization|access[_-]?token|refresh[_-]?token|client[_-]?secret|private[_-]?key|signing[_-]?key|aws_secret_access_key|aws_access_key_id|session[_-]?token|credentials|dsn|connection[_-]?string|_authToken|_auth"
+  .replace(/[iks]/g, letter => ({ i: "[iİı]", k: "[kK]", s: "[sſ]" })[letter]!);
+// Any URI scheme can carry "user:password@" userinfo, so a database or message
+// broker DSN discloses a credential exactly like an https URL does. The username
+// may be empty ("redis://:password@host"), which still discloses the password.
+const ID_URL_USERINFO = new RegExp(`([a-z][a-z0-9+.\\-]{1,31}://)[^${ID_WHITESPACE}/@]*:[^${ID_WHITESPACE}/@]+@`, "giu");
 const ID_BEARER = new RegExp(`(?<![${ID_WORD}])Bearer[${ID_WHITESPACE}]+[A-Za-zİı0-9._~+/=-]+`, "giu");
 const ID_TOKEN = new RegExp(`(?<![${ID_WORD}])(?:sk-[A-Za-z0-9_-]{8,}|gh[pousr]_[A-Za-z0-9]{12,}|github_pat_[A-Za-z0-9_]{12,}|npm_[A-Za-z0-9]{12,}|apikey_[A-Za-z0-9_-]{16,})${ID_WORD_BOUNDARY}`, "gu");
 const ID_JWT = new RegExp(`(?<![${ID_WORD}])eyJ[A-Za-z0-9_-]{5,}\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+${ID_WORD_BOUNDARY}`, "gu");
@@ -148,6 +163,35 @@ function sanitizeQuestionId(value: string, secret?: string): string {
     .replace(ID_TOKEN, "[REDACTED]")
     .replace(ID_JWT, "[REDACTED]")
     .replace(ID_ASSIGNMENT, '$1"[REDACTED]"');
+}
+
+/** Redact every string a caller supplied, mirroring Python `sanitize_state`. */
+function sanitizePayloadText(value: string, secret?: string): string {
+  return sanitizeQuestionId(value, secret);
+}
+
+/**
+ * Apply redaction to a request value. Strings are redacted in place; arrays and
+ * plain objects are rebuilt so a caller's own object is never mutated. Object
+ * keys are redacted too, matching Python's `sanitize_state`, and a key that
+ * collapses onto an existing one is rejected rather than silently overwriting.
+ */
+function sanitizeValue<T>(value: T, secret?: string): T {
+  if (typeof value === "string") return sanitizePayloadText(value, secret) as unknown as T;
+  if (Array.isArray(value)) return value.map(item => sanitizeValue(item, secret)) as unknown as T;
+  if (isRecord(value)) {
+    const result: Record<string, unknown> = {};
+    for (const key of Object.keys(value)) {
+      // Mirror validateJson: never invoke an accessor while rebuilding the payload.
+      const descriptor = Object.getOwnPropertyDescriptor(value, key)!;
+      if (!("value" in descriptor)) fail("invalid_request");
+      const cleanKey = sanitizePayloadText(key, secret);
+      if (Object.hasOwn(result, cleanKey)) fail("invalid_request");
+      result[cleanKey] = sanitizeValue(descriptor.value, secret);
+    }
+    return result as unknown as T;
+  }
+  return value;
 }
 
 /** Check JSON without invoking custom toJSON methods or accepting undefined/NaN. */
@@ -333,12 +377,13 @@ function parseResponse(data: unknown, questions: Record<string, NativeQuestion>)
   return { decisions: Object.fromEntries(decisions), resolved_model: data.model, usage: { input_tokens: tokens(usage.input_tokens), output_tokens: tokens(usage.output_tokens) } };
 }
 
-function unavailable(requestId: string, started: number, code: ErrorCode, attempts = 0): DecisionBatch {
+function unavailable(requestId: string, started: number, code: ErrorCode, attempts = 0,
+                    requestedModel = DEFAULT_MODEL): DecisionBatch {
   return {
     status: code === "offline" ? "offline" : "unavailable", source: "none", decisions: {},
-    requested_model: DEFAULT_MODEL, resolved_model: null, usage: { input_tokens: null, output_tokens: null },
+    requested_model: requestedModel, resolved_model: null, usage: { input_tokens: null, output_tokens: null },
     latency_ms: Math.max(0, performance.now() - started), attempts, request_id: requestId,
-    error_code: code, is_fallback: false,
+    error_code: code, is_fallback: false, advisory_only: true,
   };
 }
 function beforeDeadline<T>(pending: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -360,7 +405,8 @@ function retryAfterMilliseconds(value: string | null): number | null {
     return Number.isFinite(milliseconds) ? milliseconds : null;
   }
   // Require an HTTP date, rather than Date.parse's permissive numeric/date input.
-  if (!/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)(?:day)?,/i.test(hint)) return null;
+  // Accept the RFC 1123, RFC 850 and asctime day-name forms Python's parser accepts.
+  if (!/^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*,/i.test(hint)) return null;
   const parsed = Date.parse(hint);
   return Number.isFinite(parsed) ? Math.max(0, parsed - Date.now()) : null;
 }
@@ -468,8 +514,11 @@ export class JevClient implements JevEvaluator {
     this.#timeoutMs = options.timeoutMs ?? MAX_DEADLINE_MS;
     if (!Number.isInteger(this.#timeoutMs) || this.#timeoutMs < 1 || this.#timeoutMs > MAX_DEADLINE_MS) throw new RangeError("timeoutMs must be an integer between 1 and 5000.");
     // Unexpanded ${NAME}/{env:NAME}/$NAME/%NAME% references (passed through by some
-    // harness configurations when the variable is unset) are never credentials.
-    if (options.apiKey !== undefined && (typeof options.apiKey !== "string" || !/^[\x21-\x7e]{1,512}$/.test(options.apiKey)
+    // harness configurations when the variable is unset) are never credentials, and a
+    // value the user left behind while setting one is not a usable key. The bound and
+    // the reserved values match the Python client exactly.
+    if (options.apiKey !== undefined && (typeof options.apiKey !== "string" || !/^[\x21-\x7e]{1,4096}$/.test(options.apiKey)
+      || PLACEHOLDER_LITERALS.has(options.apiKey.toLowerCase())
       || /^(?:\$\{[^{}]*\}|\{env:[^{}]*\}|\$[A-Za-z_][A-Za-z0-9_]*|%[A-Za-z_][A-Za-z0-9_]*%)$/.test(options.apiKey))) throw new TypeError("Invalid API credential format.");
     this.#apiKey = options.apiKey;
     this.#offlineMode = options.offlineMode ?? false;
@@ -490,6 +539,12 @@ export class JevClient implements JevEvaluator {
     let canonical: Record<string, NativeQuestion>;
     let hash: string;
     const originalIds = new Map<string, string>();
+    const originalChoices = new Map<string, Record<string, string>>();
+    const originalLegends = new Map<string, Record<string, Description>>();
+    // Match the Python client's precedence: an offline or unconfigured client
+    // reports that condition before it validates the request payload.
+    if (this.#offlineMode) return unavailable(requestId, started, "offline", 0, model);
+    if (!this.isConfigured) return unavailable(requestId, started, "missing_key", 0, model);
     try {
       if (model !== DEFAULT_MODEL || !((typeof state === "string" && state.trim()) || (Array.isArray(state) && state.length) || (isRecord(state) && Object.keys(state).length))) fail("invalid_request");
       const wireQuestions = Object.fromEntries(Object.entries(normalizeQuestions(questions)).map(([id, question]) => {
@@ -497,26 +552,70 @@ export class JevClient implements JevEvaluator {
         assertId(wireId);
         if (originalIds.has(wireId)) fail("invalid_request");
         originalIds.set(wireId, id);
-        return [wireId, question];
+        // Redact the whole question body, not just its ID: the Python client
+        // sanitizes instructions, criteria and legends before transmission.
+        const sanitized = sanitizeValue(question, this.#apiKey) as NativeQuestion;
+        if (question.type === "choice") {
+          const restored: Record<string, string> = {};
+          for (const [label, description] of Object.entries(question.criteria)) {
+            const wireLabel = sanitizeQuestionId(label, this.#apiKey);
+            if (Object.hasOwn(restored, wireLabel)) fail("invalid_request");
+            restored[wireLabel] = label;
+          }
+          originalChoices.set(wireId, restored);
+        } else if (question.type === "score") {
+          originalLegends.set(wireId, Object.fromEntries(
+            question.criteria.map((level, index) => [String(index), level]),
+          ));
+        }
+        return [wireId, sanitized];
       }));
-      const payload = { model: DEFAULT_MODEL, state, questions: wireQuestions };
+      const payload = { model: DEFAULT_MODEL, state: sanitizeValue(state, this.#apiKey), questions: wireQuestions };
       validateJson(payload, MAX_REQUEST_BYTES, "invalid_request");
       body = JSON.stringify(payload);
       if (Buffer.byteLength(body, "utf8") > MAX_REQUEST_BYTES) fail("request_too_large");
+      // Belt and braces: refuse to transmit the live credential even if a
+      // redaction rule were ever to miss it. A very short key would match
+      // ordinary prose, so the substring scan only applies to a real token.
+      if (this.#apiKey && this.#apiKey.length >= MIN_CREDENTIAL_SCAN_LENGTH) {
+        const escapedKey = JSON.stringify(this.#apiKey).slice(1, -1);
+        if (body.includes(this.#apiKey) || body.includes(escapedKey)) fail("credential_in_payload");
+      }
       // Validation later compares against the immutable payload snapshot actually sent.
       const snapshot = JSON.parse(body) as typeof payload;
       canonical = snapshot.questions;
       hash = createHash("sha256").update(stableJson(snapshot)).digest("hex");
     } catch (error) {
-      return unavailable(requestId, started, error instanceof ClientFailure ? error.code : "invalid_request");
+      return unavailable(requestId, started, error instanceof ClientFailure ? error.code : "invalid_request", 0, model);
     }
-    if (this.#offlineMode) return unavailable(requestId, started, "offline");
-    if (!this.isConfigured) return unavailable(requestId, started, "missing_key");
-    if (performance.now() - started >= this.#timeoutMs) return unavailable(requestId, started, "timeout");
+    // offlineMode and isConfigured were already checked before the payload was
+    // prepared, so only the deadline can still have elapsed here.
+    if (performance.now() - started >= this.#timeoutMs) return unavailable(requestId, started, "timeout", 0, model);
     // Cache/in-flight entries retain wire IDs so aliases cannot return a previous
     // caller's identifier. Never mutate a batch shared with another invocation.
     const restoreIds = (batch: DecisionBatch): DecisionBatch => ({
-      ...structuredClone(batch), decisions: Object.fromEntries(Object.entries(batch.decisions).map(([id, decision]) => [originalIds.get(id)!, structuredClone(decision)])),
+      ...structuredClone(batch),
+      decisions: Object.fromEntries(Object.entries(batch.decisions).map(([id, decision]) => {
+        const restored = structuredClone(decision) as Decision;
+        // Choice labels and Score legends are redacted on the wire; the caller
+        // receives its own originals back, matching the Python client.
+        if (restored.type === "choice") {
+          const labels = originalChoices.get(id);
+          if (labels) {
+            if (Object.hasOwn(labels, restored.selected)) restored.selected = labels[restored.selected]!;
+            // The distribution keys are wire labels too; remap them with the selection.
+            const remapped: Record<string, number> = {};
+            for (const [key, value] of Object.entries(restored.probabilities)) {
+              remapped[Object.hasOwn(labels, key) ? labels[key]! : key] = value;
+            }
+            restored.probabilities = remapped;
+          }
+        } else if (restored.type === "score") {
+          const legend = originalLegends.get(id);
+          if (legend) restored.legend = structuredClone(legend);
+        }
+        return [originalIds.get(id)!, restored];
+      })),
     });
     const fromCache = (batch: DecisionBatch): DecisionBatch => ({
       ...restoreIds(batch), source: "cache", usage: { input_tokens: 0, output_tokens: 0 },
@@ -535,7 +634,7 @@ export class JevClient implements JevEvaluator {
         return batch.status === "ok" ? fromCache(batch) : { ...structuredClone(batch), attempts: 0, request_id: requestId, latency_ms: performance.now() - started };
       }
     }
-    const pending = this.#request(body, canonical, started, requestId);
+    const pending = this.#request(body, canonical, started, requestId, model);
     if (this.#cacheEnabled) this.#inFlight.set(hash, pending);
     try {
       const batch = await pending;
@@ -547,7 +646,8 @@ export class JevClient implements JevEvaluator {
     } finally { if (this.#cacheEnabled) this.#inFlight.delete(hash); }
   }
 
-  async #request(body: string, questions: Record<string, NativeQuestion>, started: number, requestId: string): Promise<DecisionBatch> {
+  async #request(body: string, questions: Record<string, NativeQuestion>, started: number, requestId: string,
+                 model = DEFAULT_MODEL): Promise<DecisionBatch> {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), Math.max(1, this.#timeoutMs - (performance.now() - started)));
     let attempts = 0;
@@ -586,9 +686,9 @@ export class JevClient implements JevEvaluator {
           if (typeof reportedInput === "number" && Number.isInteger(reportedInput) && reportedInput > MAX_INPUT_TOKENS) {
             // An unsafe integer becomes unknown telemetry, but its clear overrun
             // must still prevent exposing or caching an anomalous answer.
-            return { ...unavailable(requestId, started, "invalid_response", attempts), usage };
+            return { ...unavailable(requestId, started, "invalid_response", attempts, model), usage };
           }
-          return { status: "ok", source: "provider", ...parsed, usage, requested_model: DEFAULT_MODEL, latency_ms: performance.now() - started, attempts, request_id: requestId, error_code: null, is_fallback: false };
+          return { status: "ok", source: "provider", ...parsed, usage, requested_model: model, latency_ms: performance.now() - started, attempts, request_id: requestId, error_code: null, is_fallback: false, advisory_only: true };
         } catch (error) {
           const failure = error instanceof ClientFailure ? error : new ClientFailure("invalid_response");
           if (!failure.transient || attempts >= 2 || controller.signal.aborted) throw failure;
@@ -598,7 +698,7 @@ export class JevClient implements JevEvaluator {
         }
       }
     } catch (error) {
-      return unavailable(requestId, started, error instanceof ClientFailure ? error.code : "transport_error", attempts);
+      return unavailable(requestId, started, error instanceof ClientFailure ? error.code : "transport_error", attempts, model);
     } finally { clearTimeout(timer); }
   }
 }

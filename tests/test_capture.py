@@ -37,6 +37,26 @@ def test_windows_explicit_batch_path_is_rejected_without_path_resolution(tmp_pat
         capture.capture_output(tmp_path / "capture", [str(tmp_path / "producer.CMD")])
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows batch launch behavior")
+@pytest.mark.parametrize("suffix", [" ", ".", "  ", " ."])
+@pytest.mark.parametrize("spelling", ["plain", "upper", "mixed"])
+def test_windows_batch_alias_spellings_are_rejected(tmp_path, monkeypatch, suffix, spelling):
+    """Trailing dots and spaces are stripped by Win32, so ``producer.cmd `` runs the batch file."""
+    from jev_decision import capture
+    monkeypatch.setattr(capture.shutil, "which", lambda _name: None)
+    name = {"plain": "producer.cmd", "upper": "PRODUCER.CMD", "mixed": "Producer.Cmd"}[spelling]
+    with pytest.raises(ValueError, match="batch_producer_requires_explicit_interpreter"):
+        capture.capture_output(tmp_path / "capture", [str(tmp_path / name) + suffix])
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows batch launch behavior")
+def test_windows_non_batch_executable_is_not_mistaken_for_a_batch_script(tmp_path, monkeypatch):
+    from jev_decision import capture
+    monkeypatch.setattr(capture.shutil, "which", lambda _name: None)
+    assert capture._windows_batch_executable(str(tmp_path / "python.exe")) is None
+    assert capture._windows_batch_executable("node") is None
+
+
 @pytest.mark.parametrize("entry", ["example", "cli", "module"])
 def test_capture_preserves_binary_streams_exit_status_and_originals(tmp_path, entry):
     target = tmp_path / "evidence"

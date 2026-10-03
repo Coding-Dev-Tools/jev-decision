@@ -6,7 +6,7 @@ import pytest
 from jev_decision import cli, credentials
 from jev_decision.client import JevClient
 from jev_decision.credentials import CredentialError
-from jev_decision.runtime import RuntimeConfig
+from jev_decision.runtime import RuntimeConfig, RuntimeConfigError
 
 INVALID_KEYS = [
     pytest.param("synthetic-\x1f-key", id="control"),
@@ -22,6 +22,42 @@ INVALID_KEYS = [
 # An unexpanded reference is refused for storage; from the environment it is
 # treated as an absent variable (see the placeholder test below).
 STORE_INVALID_KEYS = INVALID_KEYS + [pytest.param("${TYPESAFE_API_KEY}", id="unexpanded-placeholder")]
+
+# Values a user leaves behind while setting a credential. They are printable
+# ASCII, so format validation alone would store them as a "present" credential.
+PLACEHOLDER_LITERALS = [
+    pytest.param("...", id="readme-ellipsis"),
+    pytest.param("changeme", id="changeme"),
+    pytest.param("change-me", id="change-me"),
+    pytest.param("change_me", id="change_me"),
+    pytest.param("CHANGEME", id="uppercase"),
+    pytest.param("your-api-key", id="your-api-key"),
+    pytest.param("placeholder", id="placeholder"),
+    pytest.param("dummy", id="dummy"),
+    pytest.param("TODO", id="todo"),
+    pytest.param("none", id="none"),
+    pytest.param("null", id="null"),
+    pytest.param("xxx", id="xxx"),
+]
+
+
+@pytest.mark.parametrize("value", PLACEHOLDER_LITERALS)
+def test_placeholder_literal_is_not_a_usable_credential(value):
+    assert credentials._is_placeholder(value) is True
+    assert credentials._valid_key_format(value) is False
+
+
+@pytest.mark.parametrize("value", ["sk-live-abc123", "a-real-looking-token", "!"])
+def test_genuine_credential_values_are_unaffected(value):
+    assert credentials._is_placeholder(value) is False
+
+
+@pytest.mark.parametrize("name", ["HOME", "PATH", "USERPROFILE", "USER", "HOSTNAME", "TEMP",
+                                  "PYTHONPATH", "SYSTEMROOT", "APPDATA"])
+def test_credential_environment_variable_cannot_name_a_standard_variable(tmp_path, name):
+    """Adopting HOME as a key would transmit a local path in the Authorization header."""
+    with pytest.raises(RuntimeConfigError, match="non-secret"):
+        RuntimeConfig(home=tmp_path / "runtime", credential_source="env", key_env=name)
 
 
 @pytest.mark.parametrize("key", STORE_INVALID_KEYS)

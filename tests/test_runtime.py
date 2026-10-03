@@ -461,6 +461,50 @@ def test_excerpt_redacts_recognizable_credentials():
     assert '"ok": true' in clean
 
 
+@pytest.mark.parametrize("text,secret", [
+    ("postgres://app:hunter2@db.internal:5432/prod", "hunter2"),
+    ("mongodb+srv://user:pass@cluster.example/db", "pass"),
+    ("redis://:redispw@cache.internal:6379/0", "redispw"),
+    ("amqp://guest:guest@broker:5672/", "guest:guest"),
+    ('{"dsn": "postgres://u:p@h/db"}', "postgres://u:p@h/db"),
+])
+def test_uri_userinfo_credentials_are_redacted_for_any_scheme(text, secret):
+    """A database DSN discloses a credential exactly like an https URL does."""
+    clean = policy.sanitize(text)
+    assert secret not in clean
+    assert "[REDACTED]" in clean
+
+
+@pytest.mark.parametrize("text,secret", [
+    ("aws_access_key_id=AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"),
+    ("passphrase: correct-horse-battery", "correct-horse-battery"),
+    ('signing_key = abcdef1234567890abcdef', "abcdef1234567890abcdef"),
+    ("session_token = abcdef0123456789", "abcdef0123456789"),
+])
+def test_additional_credential_assignments_are_redacted(text, secret):
+    assert secret not in policy.sanitize(text)
+
+
+@pytest.mark.parametrize("text", [
+    "dsn: unknown",
+    "credentials: pending",
+    '{"credentials": "rotated", "region": "us-east-1"}',
+    "The dsn: value is redacted, which is wrong",
+    "note: 12:30@here",
+    "see also 2:1@3",
+    "see https://example.com/docs for details",
+    "user@example.com wrote this",
+    "http://localhost:8080/health",
+    "http://[::1]:8080/path",
+    "registry.io:5000/img@sha256:abcdef",
+    "C:\\Users\\bob\\Documents\\a@b",
+    "the DSN is documented in the runbook",
+])
+def test_ordinary_state_is_not_mangled_by_credential_screening(text):
+    """Only real credential shapes are rewritten; user data is left intact."""
+    assert policy.sanitize(text) == text
+
+
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), {1: "bad"}, {"bad": object()}])
 def test_non_json_state_fails_closed(value):
     with pytest.raises(policy.PolicyError):

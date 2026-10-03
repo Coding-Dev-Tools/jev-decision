@@ -115,6 +115,10 @@ def run_setup(*, interactive: bool = True, credential_source: Optional[str] = No
     backend = validate_credential_source(updated)
     presence = credential_status(updated)
     credential_saved = False
+    # Preserve an existing vault entry on reconfiguration. Gating on setup_complete alone
+    # let a library caller (or a hand-edited config) overwrite a working stored credential
+    # with no undo. setup_complete=False with a keyring source means the setup was never
+    # completed, so there is nothing to preserve and the key entry below must still run.
     preserve_keyring = (previous.setup_complete and previous.credential_source == "keyring"
                         and credential_source == "keyring")
     if interactive and credential_source in {"dpapi", "keyring"} and not preserve_keyring:

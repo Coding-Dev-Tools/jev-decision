@@ -581,3 +581,106 @@ test("fine-precision probabilities retain the existing strict weighted tolerance
   data.answers.quality.score = 1.69;
   assertUnavailable(await clientFor(data).evaluate("state", questions()), "invalid_response");
 });
+
+test("every caller-supplied string is redacted on the wire, not only question IDs", async () => {
+  const key = "SUPERSECRETKEY123";
+  const bodies = [];
+  const client = new JevClient({ apiKey: key, cacheEnabled: false, fetchImpl: async (_url, init) => {
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    const [first, second] = Object.keys(body.questions.q1.criteria);
+    return jsonResponse({
+      model: DEFAULT_MODEL,
+      answers: { q1: { type: "choice", choice: first, confidence: 0.9, probabilities: { [first]: 0.9, [second]: 0.1 } } },
+    });
+  } });
+  const result = await client.evaluate(
+    `Build log. My key is ${key}. password=hunter2. DSN postgres://u:pw@h/d.`,
+    { q1: { type: "choice", instructions: `Assess with ${key}`, criteria: { keep: "keep it", escalate: "escalate it" } } },
+  );
+  const wire = JSON.stringify(bodies[0]);
+  assert.ok(!wire.includes(key), "API key reached the wire");
+  assert.ok(!wire.includes("hunter2"), "password assignment reached the wire");
+  assert.ok(!wire.includes("postgres://u:pw@h"), "DSN credentials reached the wire");
+  // The caller still receives its own, unredacted labels.
+  assert.equal(result.decisions.q1.selected, "keep");
+});
+
+test("choice labels that collide only after redaction are rejected before transmission", async () => {
+  let calls = 0;
+  const client = new JevClient({ apiKey: "test-credential", cacheEnabled: false, fetchImpl: async () => {
+    calls += 1;
+    return jsonResponse(answer());
+  } });
+  assertUnavailable(await client.evaluate("state", {
+    q: { type: "choice", instructions: "Choose", criteria: { "password=alpha": null, "password=beta": null } },
+  }), "invalid_request");
+  assert.equal(calls, 0);
+});
+
+test("object keys are redacted on the wire and the caller still gets its originals", async () => {
+  const bodies = [];
+  const client = new JevClient({ apiKey: "SUPERSECRETKEY123", cacheEnabled: false, fetchImpl: async (_url, init) => {
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    const [first, second] = Object.keys(body.questions.q1.criteria);
+    return jsonResponse({ model: DEFAULT_MODEL, answers: { q1: {
+      type: "choice", choice: first, confidence: 0.9, probabilities: { [first]: 0.9, [second]: 0.1 } } } });
+  } });
+  const label = "dsn=postgres://admin:sup3rSecret@db/prod";
+  const result = await client.evaluate("state", { q1: { type: "choice", instructions: "P",
+    criteria: { [label]: "a", "safe=yes": "b" } } });
+  assert.ok(!JSON.stringify(bodies[0]).includes("sup3rSecret"), "credential in an object key reached the wire");
+  assert.equal(result.decisions.q1.selected, label);
+  assert.deepEqual(Object.keys(result.decisions.q1.probabilities), [label, "safe=yes"]);
+});
+
+test("accessors in state are rejected rather than invoked", async () => {
+  let invoked = false;
+  const state = {};
+  Object.defineProperty(state, "leak", { get() { invoked = true; return "pw=hunter2"; }, enumerable: true });
+  const client = new JevClient({ apiKey: "test-credential", cacheEnabled: false,
+    fetchImpl: async () => { throw new Error("must not be called"); } });
+  assertUnavailable(await client.evaluate(state, { q: { type: "noul", instructions: "y" } }), "invalid_request");
+  assert.equal(invoked, false);
+});
+
+test("a short key does not reject ordinary prose", async () => {
+  const client = new JevClient({ apiKey: "a", cacheEnabled: false, fetchImpl: async () =>
+    jsonResponse({ model: DEFAULT_MODEL, answers: { q: { type: "noul", noul: 0.5 } } }) });
+  const result = await client.evaluate("a normal sentence", { q: { type: "noul", instructions: "y" } });
+  assert.equal(result.status, "ok");
+});
+
+test("placeholder literals are refused exactly as in Python", () => {
+  for (const apiKey of ["changeme", "change-me", "none", "null", "sample", "xxx",
+                        "test-key", "dummy", "todo", "tbd", "-", "--", "...", "placeholder"]) {
+    assert.throws(() => new JevClient({ apiKey }), TypeError, `accepted ${apiKey}`);
+  }
+});
+
+test("error precedence reports the client state before validating the payload", async () => {
+  const malformed = { q: { type: "not-a-type" } };
+  const offline = await new JevClient({ offlineMode: true, apiKey: "test-credential" }).evaluate("state", malformed);
+  assert.equal(offline.status, "offline");
+  assert.equal(offline.error_code, "offline");
+  assertUnavailable(await new JevClient().evaluate("state", malformed), "missing_key");
+});
+
+test("reserved demo credentials are refused rather than sent to the provider", () => {
+  for (const apiKey of ["mock", "MOCK", "offline"]) {
+    assert.throws(() => new JevClient({ apiKey }), TypeError);
+  }
+});
+
+test("every result reports advisory_only", async () => {
+  const ok = await clientFor(answer()).evaluate("state", questions());
+  assert.equal(ok.advisory_only, true);
+  const missing = await new JevClient().evaluate("state", questions());
+  assert.equal(missing.advisory_only, true);
+});
+
+test("requested_model echoes the caller's requested model", async () => {
+  const result = await clientFor(answer()).evaluate("state", questions(), DEFAULT_MODEL);
+  assert.equal(result.requested_model, DEFAULT_MODEL);
+});

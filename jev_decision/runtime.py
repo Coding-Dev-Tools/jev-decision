@@ -25,6 +25,18 @@ class RuntimeConfigError(ValueError):
     """Invalid local configuration; messages never include setting values."""
 
 
+_NON_SECRET_ENV = frozenset({
+    "HOME", "USER", "USERNAME", "USERPROFILE", "LOGNAME", "PATH", "PWD", "OLDPWD",
+    "HOSTNAME", "HOST", "TERM", "SHELL", "COMSPEC", "LANG", "LC_ALL", "TZ",
+    "TMPDIR", "TMP", "TEMP", "APPDATA", "LOCALAPPDATA", "PROGRAMDATA",
+    "SYSTEMROOT", "SYSTEMDRIVE", "WINDIR", "PROGRAMFILES",
+    "PROGRAMFILES(X86)", "PATHEXT", "PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV",
+    "PYTHONEXECUTABLE", "NUMBER_OF_PROCESSORS", "PROCESSOR_ARCHITECTURE",
+    "OS", "OSTYPE", "DISPLAY", "XDG_CONFIG_HOME", "XDG_CACHE_HOME",
+    "XDG_DATA_HOME", "SSH_AUTH_SOCK", "EDITOR", "VISUAL", "PAGER",
+})
+
+
 def _default_home() -> Path:
     override = os.environ.get("JEV_HOME")
     if override:
@@ -116,6 +128,8 @@ class RuntimeConfig:
             raise RuntimeConfigError("Invalid credential environment variable name")
         if self.key_env.upper() in {"JEV_HOME", "JEV_ENDPOINT_URL", "JEV_OFFLINE_MODE", "JEV_HOOK", "JEV_HOOK_THRESHOLD"}:
             raise RuntimeConfigError("Credential environment variable conflicts with Jev runtime settings")
+        if self.key_env.upper() in _NON_SECRET_ENV:
+            raise RuntimeConfigError("Credential environment variable names a standard non-secret variable")
         if not isinstance(self.selection_mode, str) or self.selection_mode not in {"off", "shadow", "select"}:
             raise RuntimeConfigError("Unsupported evidence selection mode")
         for name in ("qualified_profile_path", "project_root"):
