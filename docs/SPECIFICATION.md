@@ -1,93 +1,35 @@
-# Jev "System One" Architecture & Implementation Specification
-## High-Speed Decision Gating, Token Elimination, and Latency Optimization for Agentic Ecosystems
+# Jev advisory runtime contract, v0.3
 
----
+The managed runtime pins `jev-1.13.0` and the exact official TypeSafe HTTPS endpoint. Native questions and complete typed answers follow the [provider API](https://docs.typesafe.ai/api); local limits bound latency, transmission and conservative accounting.
 
-## 1. Executive Summary & Core Philosophy
+## Client results
 
-Based on the architecture disclosed by **Diogo Almeida (@CompleteSkeptic)** during the official launch of **Jev (TypeSafe AI)** and empirical validations from the September 2026 research paper (*arXiv:2609.29429*), AI agent architectures suffer from a fundamental mismatch: **using heavyweight, autoregressive System 2 generative models to make rapid, micro-level System 1 decisions.**
+Python and TypeScript expose `status`, `source`, `decisions`, requested/resolved model, usage, latency, attempts, request ID and a content-free error code. Unknown usage remains null, including retries with unknown earlier usage. Cache hits report zero new attempts/usage. Native Choice descriptions may be null. Score preserves fractional rubric positions, legends and provider rounding; it does not renormalize the wire response. Invalid or missing answers reject the whole batch.
 
-```mermaid
-flowchart TD
-    subgraph Traditional["Traditional Agent Loop (Slow & Token-Heavy)"]
-        T1["Agent Turn / Tool Call"] --> T2["Frontier LLM (System 2)\n1,500-4,000ms | 1k-15k tokens\nJSON Output Parsing + Retries"]
-        T2 --> T3["Tool Execution / State Update"]
-    end
+Offline, missing credentials, expired deadlines and provider failures return no synthetic decisions. Command assessment cannot grant permission, completion assessment cannot certify execution, and advice cannot overwrite canonical benchmark or memory evidence.
 
-    subgraph JevArchitecture["Jev-Augmented Architecture (70-300ms, Zero Output Cost)"]
-        J1["Agent Turn / Tool Call"] --> J2{"Jev System 1 Gate\n$0.042/M in | $0 out\n70-300ms Parallel Pass"}
-        J2 -- "High Confidence Auto-Pass (p >= 0.95)" --> J3["Instant Tool / Fast Path Execution"]
-        J2 -- "Ambiguous (0.40 <= p < 0.95)" --> J4["Escalate to Frontier LLM or User"]
-        J2 -- "Prune / Drop (p < 0.40)" --> J5["Discard Distraction / Halt Safe Loop"]
-    end
-```
+## Execution and accounting
 
-### The 5 Architectural Pillars of Jev
+Fresh runtime loads stay disabled until configured. Explicit library construction can opt in by passing an enabled runtime or supplying an `api_key` argument before any configuration is saved. The explicit-key opt-in uses the default daily cap and shared ledger. Ambient `TYPESAFE_API_KEY`/`JEV_API_KEY` values alone cannot enable fresh clients or hooks. CLI and MCP processes pass their loaded runtime and never opt in implicitly. One monotonic deadline covers preprocessing, reservation, connection, transmission, bounded response reading, validation and settlement. A late connection cannot transmit after cancellation. Retry-After seconds/dates, transient failures including 529 and jitter stay inside one optional retry. Unknown or unfinished accounting retains a conservative reservation; it never creates a success/cache entry after the deadline.
 
-1. **Non-Generative Decision Architecture**: Jev generates **zero prose tokens**. Output tokens are unmetered ($0) because it returns typed numerical probability vectors over predefined questions rather than autoregressive sequences.
-2. **Elimination of JSON & Syntax Retries**: Because outputs are deterministic scalar/vector primitives, there are no malformed JSON blobs, no markdown code fence parsing errors, and zero token-wasting retry loops.
-3. **Single Forward-Pass Multi-Question Parallelism**: Jev evaluates an arbitrary set of questions against a shared state in a **single parallel forward pass**. Evaluating 1 question vs 8 questions costs virtually identical latency (70–300 ms).
-4. **Calibrated Probabilities via RLCD**: Unlike standard LLM logit outputs that drift or over-confidently hallucinate, Jev is trained via *Reinforcement Learning for Calibrated Decisions* (RLCD). A reported probability $p = 0.92$ empirically reflects 92% ground-truth accuracy.
-5. **Disruptive Unit Economics**: At **$0.042 per million input tokens** and **$0 output tokens**, Jev is ~100x–400x cheaper than frontier LLM calls, turning high-frequency guardrail and filtering checks from cost liabilities into near-zero-cost operations.
+Before every request, SQLite serializes a maximum-request reservation across processes sharing `JEV_HOME`. The configured nonnegative daily budget can exceed the former personal $1 setting; zero disables calls. UTC is the portable default. v1 settings keep their enabled state, budget, New York timezone and ledger history. Timezone changes take effect after the active accounting period so they cannot reset spend early. Provider usage and modeled cost remain distinct from invoices.
 
----
+DPAPI protects Windows credentials. Optional OS keyring backends support macOS Keychain/Linux Secret Service; plaintext fallbacks are refused. An explicit environment variable reference supports headless use. Status inspects presence metadata without unlocking a keychain; it never claims authentication. TypeScript is an explicit unmanaged client and does not share Python's local cap.
 
-## 2. Jev Primitives & Core Protocol
+## Evidence and profiles
 
-Jev operates over three typed decision primitives:
+`off` makes no semantic calls. `shadow` scores bounded eligible records while retaining evidence. `select` requires the exact recoverable original, a qualified profile/report, and matching workload identity. Unknown formats, unprocessed spans and uncertain answers remain intact. File reads preserve source line positions through redaction and expose bounded pagination and changed-hash rejection. Originals are never automatically removed.
 
-| Primitive | Return Type | Description | Primary Use Case in Harnesses |
-|---|---|---|---|
-| **Noul** | `float` (0.0 to 1.0) | Calibrated Bayesian probability that a proposition is true ($P(\text{True})$). | Tool safety check, loop completion verification, contradiction presence. |
-| **Choice** | `Dict[str, float]` | Probability distribution over a closed set of categorical labels. | Tool routing, action classification (`safe_read`, `file_edit`, `destructive`, `network_leak`). |
-| **Score** | `int` / `float` (ordinal scale) | Position on a defined rubric scale (e.g. 0 to 4). | Context chunk relevance ranking, test failure severity triage. |
+The initial limits are 16 questions/~16 KiB per batch, two concurrent evaluations and a five-second selection deadline. Critical structural groups and adjacent context remain protected. These bounds are engineering defaults requiring workload calibration. Omission markers, JSON envelopes, retries, recovery and Jev all count toward measurement.
 
----
+Qualification recomputes held-out metrics rather than trusting summary flags. It binds source/label/report hashes, Jev model/rubric/thresholds/source classes, explicit primary model/harness identity, independent task/project groups, matched arms/cache strata and campaign budget. It requires retained critical facts, no observed task-success loss, positive net tokens and modeled cost, and no p95 task-time increase. See [evaluation](EVALUATION.md).
 
-## 3. Empirical Research Findings (arXiv:2609.29429)
+## MCP and installation
 
-Tested across 7,193 model responses and 44 benchmarks (hallucination detection, prompt injection, jailbreaks, data leakage):
-1. **0.886 median AUROC**: Outperformed task-specific trained classifiers on 25 of 31 benchmarks without fine-tuning.
-2. **Threshold Tuning**: Fitting a decision threshold on as few as 10 domain examples raises median F1 from 0.706 to 0.793.
-3. **Selective Classification (Confidence Triage)**: The top 50% most confident decisions reach **93.3% accuracy**, proving that routing low-confidence cases to human/frontier models achieves production-grade precision.
-4. **Cost Multiplier**: 11.4 questions per call evaluated at 0.31s latency cost $0.30 vs $18.96 using standard LLM judges (63x cost reduction).
+The optional official Python MCP SDK v2 owns protocol negotiation, JSON-RPC framing and errors. It serves legacy and current clients with complete tool schemas. A bounded byte reader rejects oversized/invalid frames without echoing their payload. UTF-8 is explicit for Windows pipes. Core library/JSON CLI imports do not load the SDK.
 
----
+Selected user/project installation previews and applies Jev-owned entries only. Restoration keeps unrelated settings and reports modified conflicts. Absolute launchers and runtime-home bindings keep processes on one credential/ledger. Configuration, connection, authentication, actual invocation and workload qualification are separate states. No tool executes assessed commands or changes permission policy.
 
-## 4. Cross-Repository Integration Checkpoints
+`jev hook run HARNESS` adapts one pre-tool hook payload (Claude Code, Command Code, Codex, Cursor, Gemini CLI) to an escalate-only decision: `ask` where the hook supports it, otherwise `deny`, and by default only in sessions without approval prompts. It never emits `allow`. It skips plain read-only commands and always exits 0 with no decision on any local failure.
 
-### Checkpoint A: Upstream Context & Tool-Output Pruning
-- **Location**: `hermes-agent/agent/context_compressor.py` & `engraphis/core/recall.py`.
-- **Mechanism**: Chunks evaluated against current goal; boilerplate/passing tests replaced with concise omission markers.
-- **Impact**: 80%–92% reduction in ongoing context window tokens.
-
-### Checkpoint B: Autonomous Tool & Bash Safety Gating
-- **Location**: `hermes-agent/agent/tool_guardrails.py` & CLI agents.
-- **Mechanism**: Jev evaluates `is_safe` ($p \ge 0.95$). Safe read/test commands execute instantly. Destructive commands are caught and escalated.
-- **Impact**: Eliminates 90% of user confirmation interruptions without compromising safety.
-
-### Checkpoint C: Turn-End Verification & Loop Stop Gating
-- **Location**: `hermes-agent/agent/verification_stop.py`.
-- **Mechanism**: Assesses `has_verified_changes` and empirical test proof. Prevents premature turn halting when unverified code modifications are detected.
-
-### Checkpoint D: Engraphis Contradiction & Grounded Support Gating
-- **Location**: `engraphis/backends/jev_decision.py`.
-- **Mechanism**: Fast System 1 classification of new facts vs live memories (`contradicts_and_supersedes` vs `reinforces` vs `orthogonal`), plus Grounded Recall support verification without expensive LLM synthesis calls.
-
----
-
-## 5. Calibration Tiers
-
-| Tier | Policy | Target Operations | Default Threshold |
-|---|---|---|---|
-| **Tier 1: High Stakes** | Conservative | Destructive actions, credentials, secret changes | $P(\text{Safe}) \ge 0.95$ |
-| **Tier 2: Medium Stakes** | Balanced | Loop completion, contradiction invalidation | $P(\text{Complete}) \ge 0.85$ |
-| **Tier 3: Low Stakes** | Permissive | Context pruning, log truncation | $P(\text{Relevant}) \ge 0.40$ |
-
----
-
-## 6. Offline-First Invariant
-
-In compliance with local-first requirements:
-- The shared client (`jev-decision`) has **zero third-party dependencies** (Python standard library only).
-- When offline or when no API key is provided, the client falls back instantaneously to deterministic heuristics (regex allowlists, token overlap, and AST rules).
+The separate local `jev capture` CLI command explicitly runs the producer argv chosen by its caller, without shell expansion or Jev inference. It preserves both byte streams, their hashes and producer exit status, returns a manifest reference, and requires a new output directory. It runs without loading runtime configuration. Capture is not exposed over MCP and cannot be triggered by an advisory result.

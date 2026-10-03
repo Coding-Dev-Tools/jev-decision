@@ -1,0 +1,1059 @@
+{
+  "version": 1,
+  "kind": "jev_selection_evaluation",
+  "model": "jev-1.13.0",
+  "prompt_rubric_sha256": "007488c9abeccd0015d6051405def649ff16c76a87e5da17d6ccd52e86486d21",
+  "threshold_score": 0.25,
+  "threshold_confidence": 0.9,
+  "source_classes": [
+    "test_log"
+  ],
+  "provenance": {
+    "harness": "offline-integration-fixture",
+    "harness_version": "0.3.0",
+    "primary_model": "not_invoked",
+    "primary_provider": "none",
+    "run_mode": "offline",
+    "campaign_budget_usd": 0,
+    "dataset_sha256": "4838f1503032e6ac6c2ed4ecccf6e17ed98ad1cd20b83fd4630edad6403e6976",
+    "labels_sha256": "1f47a0624c996778e556ebc6b9a391200c0cadb3321bccc15b3d2e027d6e7e85",
+    "label_method": "deterministic",
+    "retention_method": "source_spans_v1",
+    "split_by": "task",
+    "price_snapshot_sha256": "41ea72a09643b4957db8bb8b678d5f267915b30597f7f63b9bc1ff7b421e1f5a",
+    "counterbalanced": true,
+    "campaign_cost_usd": null
+  },
+  "rows": [
+    {
+      "task_id": "case-1",
+      "group_id": "fixture-project-1",
+      "split": "development",
+      "source_class": "test_log",
+      "source_sha256": "50e418e9c8df8979e3395849ff387de4104a883936853e531d3464625303c39a",
+      "route_verified": false,
+      "arms_verified": [],
+      "trial": 1,
+      "cache_state": "cold",
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "baseline_success": null,
+      "selected_success": null,
+      "baseline_input_tokens": null,
+      "baseline_output_tokens": null,
+      "selected_input_tokens": null,
+      "selected_output_tokens": null,
+      "jev_input_tokens": 0,
+      "jev_output_tokens": 0,
+      "baseline_total_cost_usd": null,
+      "selected_total_cost_usd": null,
+      "jev_cost_usd": null,
+      "baseline_latency_ms": null,
+      "selected_latency_ms": null
+    },
+    {
+      "task_id": "case-2",
+      "group_id": "fixture-project-2",
+      "split": "development",
+      "source_class": "test_log",
+      "source_sha256": "633c97618979391f57f55b86976e099d2ccc165f05e889fcb0f9e5118dd2a419",
+      "route_verified": false,
+      "arms_verified": [],
+      "trial": 1,
+      "cache_state": "cold",
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "baseline_success": null,
+      "selected_success": null,
+      "baseline_input_tokens": null,
+      "baseline_output_tokens": null,
+      "selected_input_tokens": null,
+      "selected_output_tokens": null,
+      "jev_input_tokens": 0,
+      "jev_output_tokens": 0,
+      "baseline_total_cost_usd": null,
+      "selected_total_cost_usd": null,
+      "jev_cost_usd": null,
+      "baseline_latency_ms": null,
+      "selected_latency_ms": null
+    },
+    {
+      "task_id": "case-3",
+      "group_id": "fixture-project-3",
+      "split": "held_out",
+      "source_class": "test_log",
+      "source_sha256": "a2021cc47fbe5c847940ca8df213adf2be67bb5d4a590d4c43172c17b8cbdda3",
+      "route_verified": false,
+      "arms_verified": [],
+      "trial": 1,
+      "cache_state": "cold",
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "baseline_success": null,
+      "selected_success": null,
+      "baseline_input_tokens": null,
+      "baseline_output_tokens": null,
+      "selected_input_tokens": null,
+      "selected_output_tokens": null,
+      "jev_input_tokens": 0,
+      "jev_output_tokens": 0,
+      "baseline_total_cost_usd": null,
+      "selected_total_cost_usd": null,
+      "jev_cost_usd": null,
+      "baseline_latency_ms": null,
+      "selected_latency_ms": null
+    },
+    {
+      "task_id": "case-4",
+      "group_id": "fixture-project-4",
+      "split": "held_out",
+      "source_class": "test_log",
+      "source_sha256": "260565787436a1b3519563ac7829a837c234cff492a29b9f30af83e5d9beb2d8",
+      "route_verified": false,
+      "arms_verified": [],
+      "trial": 1,
+      "cache_state": "cold",
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "baseline_success": null,
+      "selected_success": null,
+      "baseline_input_tokens": null,
+      "baseline_output_tokens": null,
+      "selected_input_tokens": null,
+      "selected_output_tokens": null,
+      "jev_input_tokens": 0,
+      "jev_output_tokens": 0,
+      "baseline_total_cost_usd": null,
+      "selected_total_cost_usd": null,
+      "jev_cost_usd": null,
+      "baseline_latency_ms": null,
+      "selected_latency_ms": null
+    }
+  ],
+  "arms": [
+    {
+      "task_id": "case-1",
+      "arm": "baseline",
+      "order": 0,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "50e418e9c8df8979e3395849ff387de4104a883936853e531d3464625303c39a",
+      "tool_response_sha256": "ff2888282a018fee2277f7d2987028f82d6d258bea9eb8f7ae756f1f7f0d0e24",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "50e418e9c8df8979e3395849ff387de4104a883936853e531d3464625303c39a",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 8531,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 0.0,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-1",
+      "arm": "local",
+      "order": 1,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "50e418e9c8df8979e3395849ff387de4104a883936853e531d3464625303c39a",
+      "tool_response_sha256": "10376abf89112e09a5280cc457841590cffd29b9e07ddcdb81fff26910b29c77",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "50e418e9c8df8979e3395849ff387de4104a883936853e531d3464625303c39a",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 4
+        },
+        {
+          "start_line": 29,
+          "end_line": 29
+        },
+        {
+          "start_line": 54,
+          "end_line": 54
+        },
+        {
+          "start_line": 79,
+          "end_line": 79
+        },
+        {
+          "start_line": 104,
+          "end_line": 104
+        },
+        {
+          "start_line": 129,
+          "end_line": 129
+        },
+        {
+          "start_line": 135,
+          "end_line": 140
+        },
+        {
+          "start_line": 165,
+          "end_line": 165
+        },
+        {
+          "start_line": 190,
+          "end_line": 190
+        },
+        {
+          "start_line": 201,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 2717,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 0.0,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-1",
+      "arm": "shadow",
+      "order": 2,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "50e418e9c8df8979e3395849ff387de4104a883936853e531d3464625303c39a",
+      "tool_response_sha256": "e8446592014175e3b7f96c84a6665914c6a59339c2d684e8166dc3cbfb6f0ce6",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "50e418e9c8df8979e3395849ff387de4104a883936853e531d3464625303c39a",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 9936,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 30.999999959021807,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-1",
+      "arm": "select",
+      "order": 3,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "50e418e9c8df8979e3395849ff387de4104a883936853e531d3464625303c39a",
+      "tool_response_sha256": "ba1babe86845c515601bcb5036cb8f72cd9e25cbcaa0b1d2f2ef27122838d37c",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "50e418e9c8df8979e3395849ff387de4104a883936853e531d3464625303c39a",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 10027,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 30.999999959021807,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-2",
+      "arm": "local",
+      "order": 0,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "633c97618979391f57f55b86976e099d2ccc165f05e889fcb0f9e5118dd2a419",
+      "tool_response_sha256": "0f5938227904e80cf3f169e9b76785c4a435c3b77b40cdf791f680f54cfa7e8c",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "633c97618979391f57f55b86976e099d2ccc165f05e889fcb0f9e5118dd2a419",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 4
+        },
+        {
+          "start_line": 29,
+          "end_line": 29
+        },
+        {
+          "start_line": 54,
+          "end_line": 54
+        },
+        {
+          "start_line": 79,
+          "end_line": 79
+        },
+        {
+          "start_line": 104,
+          "end_line": 104
+        },
+        {
+          "start_line": 129,
+          "end_line": 129
+        },
+        {
+          "start_line": 135,
+          "end_line": 140
+        },
+        {
+          "start_line": 165,
+          "end_line": 165
+        },
+        {
+          "start_line": 190,
+          "end_line": 190
+        },
+        {
+          "start_line": 201,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 2717,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 0.0,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-2",
+      "arm": "shadow",
+      "order": 1,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "633c97618979391f57f55b86976e099d2ccc165f05e889fcb0f9e5118dd2a419",
+      "tool_response_sha256": "a0f0adf69979c47facdcdc098b5ce721b0af8cc1e4b37d4bfb8422b817ea7ae7",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "633c97618979391f57f55b86976e099d2ccc165f05e889fcb0f9e5118dd2a419",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 9935,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 32.00000000651926,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-2",
+      "arm": "select",
+      "order": 2,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "633c97618979391f57f55b86976e099d2ccc165f05e889fcb0f9e5118dd2a419",
+      "tool_response_sha256": "54147499aba1ac4771b7ffd6bb783ca561f0f64ca59c2651eae6087820be317e",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "633c97618979391f57f55b86976e099d2ccc165f05e889fcb0f9e5118dd2a419",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 10026,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 32.00000000651926,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-2",
+      "arm": "baseline",
+      "order": 3,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "633c97618979391f57f55b86976e099d2ccc165f05e889fcb0f9e5118dd2a419",
+      "tool_response_sha256": "1d5b16a4211835f51864debf85d9ff0d19fbd87bb01cccafe0bd81f6f1ee08b5",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "633c97618979391f57f55b86976e099d2ccc165f05e889fcb0f9e5118dd2a419",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 8531,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 0.0,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-3",
+      "arm": "shadow",
+      "order": 0,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "a2021cc47fbe5c847940ca8df213adf2be67bb5d4a590d4c43172c17b8cbdda3",
+      "tool_response_sha256": "8f9a4c9668c90242cc8b054107ebadb1e28f55bbe32fd696f386c8ffd1332bb8",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "a2021cc47fbe5c847940ca8df213adf2be67bb5d4a590d4c43172c17b8cbdda3",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 9935,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 32.00000000651926,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-3",
+      "arm": "select",
+      "order": 1,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "a2021cc47fbe5c847940ca8df213adf2be67bb5d4a590d4c43172c17b8cbdda3",
+      "tool_response_sha256": "c00d13c4b51d6af8431032236040c0ac6c4824fbd4f21091740cfd4d5cb4cce2",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "a2021cc47fbe5c847940ca8df213adf2be67bb5d4a590d4c43172c17b8cbdda3",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 10026,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 32.00000000651926,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-3",
+      "arm": "baseline",
+      "order": 2,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "a2021cc47fbe5c847940ca8df213adf2be67bb5d4a590d4c43172c17b8cbdda3",
+      "tool_response_sha256": "e27e9fa1f38cf7b0c578b019b288719d1ea678bcb332554f9d2b786eb464ca86",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "a2021cc47fbe5c847940ca8df213adf2be67bb5d4a590d4c43172c17b8cbdda3",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 8531,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 0.0,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-3",
+      "arm": "local",
+      "order": 3,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "a2021cc47fbe5c847940ca8df213adf2be67bb5d4a590d4c43172c17b8cbdda3",
+      "tool_response_sha256": "d614e2e1cc56f7f8212eddfc6fa45f0171a097c2297a4a8756148dbfa85ea8fe",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "a2021cc47fbe5c847940ca8df213adf2be67bb5d4a590d4c43172c17b8cbdda3",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 4
+        },
+        {
+          "start_line": 29,
+          "end_line": 29
+        },
+        {
+          "start_line": 54,
+          "end_line": 54
+        },
+        {
+          "start_line": 79,
+          "end_line": 79
+        },
+        {
+          "start_line": 104,
+          "end_line": 104
+        },
+        {
+          "start_line": 129,
+          "end_line": 129
+        },
+        {
+          "start_line": 135,
+          "end_line": 140
+        },
+        {
+          "start_line": 165,
+          "end_line": 165
+        },
+        {
+          "start_line": 190,
+          "end_line": 190
+        },
+        {
+          "start_line": 201,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 2717,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 0.0,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-4",
+      "arm": "select",
+      "order": 0,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "260565787436a1b3519563ac7829a837c234cff492a29b9f30af83e5d9beb2d8",
+      "tool_response_sha256": "62a2810cd57b9851df19701a7af0e28226f7ef510dd18c3285ee5b8f7aedb38c",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "260565787436a1b3519563ac7829a837c234cff492a29b9f30af83e5d9beb2d8",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 10027,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 30.999999959021807,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-4",
+      "arm": "baseline",
+      "order": 1,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "260565787436a1b3519563ac7829a837c234cff492a29b9f30af83e5d9beb2d8",
+      "tool_response_sha256": "6d17a33d782913c62314222d33beebdf81a45d30ee3b4974cfefbe12d5e753f0",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "260565787436a1b3519563ac7829a837c234cff492a29b9f30af83e5d9beb2d8",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 8531,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 0.0,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-4",
+      "arm": "local",
+      "order": 2,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "260565787436a1b3519563ac7829a837c234cff492a29b9f30af83e5d9beb2d8",
+      "tool_response_sha256": "28c32f2ce4a74671fe7137b250f1d3f1d69361bf367c7bcd3750a08b0f177965",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "260565787436a1b3519563ac7829a837c234cff492a29b9f30af83e5d9beb2d8",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 4
+        },
+        {
+          "start_line": 29,
+          "end_line": 29
+        },
+        {
+          "start_line": 54,
+          "end_line": 54
+        },
+        {
+          "start_line": 79,
+          "end_line": 79
+        },
+        {
+          "start_line": 104,
+          "end_line": 104
+        },
+        {
+          "start_line": 129,
+          "end_line": 129
+        },
+        {
+          "start_line": 135,
+          "end_line": 140
+        },
+        {
+          "start_line": 165,
+          "end_line": 165
+        },
+        {
+          "start_line": 190,
+          "end_line": 190
+        },
+        {
+          "start_line": 201,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 2717,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 0.0,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    },
+    {
+      "task_id": "case-4",
+      "arm": "shadow",
+      "order": 3,
+      "route_verified": false,
+      "trace_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+      "source_sha256": "260565787436a1b3519563ac7829a837c234cff492a29b9f30af83e5d9beb2d8",
+      "tool_response_sha256": "22c47d98e5043a788641f5643f6cc36b938fffc9839ac6dc4af31d369b8f379e",
+      "evidence_verified": true,
+      "evidence_input": {
+        "start_line": 1,
+        "end_line": 204,
+        "text_sha256": "260565787436a1b3519563ac7829a837c234cff492a29b9f30af83e5d9beb2d8",
+        "max_lines": 1000,
+        "max_bytes": 65536
+      },
+      "retained_source_spans": [
+        {
+          "start_line": 1,
+          "end_line": 204
+        }
+      ],
+      "tool_response_bytes": 9936,
+      "primary_usage": {
+        "input_tokens": null,
+        "output_tokens": null,
+        "cache_read_tokens": null,
+        "cache_write_tokens": null
+      },
+      "jev_usage": {
+        "input_tokens": 0,
+        "output_tokens": 0
+      },
+      "retries": 0,
+      "recovery_calls": 0,
+      "cache_state": "cold",
+      "trial": 1,
+      "total_elapsed_ms": null,
+      "preprocessing_ms": null,
+      "selection_latency_ms": 30.999999959021807,
+      "modeled_primary_cost_usd": null,
+      "modeled_jev_cost_usd": null,
+      "modeled_total_cost_usd": null,
+      "critical_evidence_total": 3,
+      "critical_evidence_retained": 3,
+      "success": null
+    }
+  ],
+  "invoice_verified": false,
+  "price_snapshot": {
+    "as_of": null,
+    "currency": null,
+    "sources": null,
+    "primary_model": null,
+    "primary_provider": null,
+    "jev_model": null,
+    "input_convention": null,
+    "input_per_million": null,
+    "output_per_million": null,
+    "cache_read_per_million": null,
+    "cache_write_per_million": null,
+    "jev_input_per_million": null,
+    "jev_output_per_million": null
+  },
+  "uncertainty": {
+    "held_out_tasks": 2,
+    "source_groups": 2,
+    "cost_complete_pairs": 0,
+    "mean_cost_savings_bootstrap_95": null,
+    "zero_observed_regressions_one_sided_95_upper_rate": null,
+    "method": "2000 deterministic bootstrap draws of source-group mean modeled cost savings; zero-event binomial bound across groups. Independence is assumed, not proven."
+  },
+  "qualification_check": {
+    "eligible": false,
+    "reason": "live_evaluation_required"
+  }
+}

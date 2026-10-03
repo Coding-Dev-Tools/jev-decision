@@ -1,101 +1,175 @@
-"""Unit tests for jev_decision MCP server and CLI."""
-
+"""Official SDK contracts and real UTF-8 subprocesses; no provider calls."""
+import asyncio
 import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
 from jev_decision.client import JevClient
-from jev_decision.mcp import MCPServer, PROTOCOL_VERSION, SERVER_NAME
+from jev_decision.mcp import MCPServer, create_sdk_server
 
 
-def test_mcp_initialize():
-    server = MCPServer(client=JevClient(offline_mode=True))
-    req = {
-        "jsonrpc": "2.0",
-        "id": 1,
-        "method": "initialize",
-        "params": {},
-    }
-    resp = server.handle_request(req)
-    assert resp["id"] == 1
-    assert resp["result"]["protocolVersion"] == PROTOCOL_VERSION
-    assert resp["result"]["serverInfo"]["name"] == SERVER_NAME
+def sdk():
+    pytest.importorskip('mcp_types', reason='Optional MCP v2 adapter requires Python 3.10+')
+    from mcp import Client
+    return Client
 
 
-def test_mcp_tools_list():
-    server = MCPServer(client=JevClient(offline_mode=True))
-    req = {
-        "jsonrpc": "2.0",
-        "id": 2,
-        "method": "tools/list",
-        "params": {},
-    }
-    resp = server.handle_request(req)
-    tools = resp["result"]["tools"]
-    tool_names = {t["name"] for t in tools}
-    assert "jev_guard_command" in tool_names
-    assert "jev_prune_output" in tool_names
-    assert "jev_verify_completion" in tool_names
-    assert "jev_decide" in tool_names
+def test_mcp_discovery_and_advisory_metadata():
+    Client = sdk()
+    async def check():
+        async with Client(create_sdk_server(MCPServer(JevClient(offline_mode=True)))) as client:
+            result = await client.list_tools()
+            assert len(result.tools) == 6
+            assert all(tool.annotations.destructive_hint is False for tool in result.tools)
+            assert all(tool.input_schema.get('properties') is not None and tool.output_schema for tool in result.tools)
+    asyncio.run(check())
 
 
-def test_mcp_tool_call_guard_command():
-    server = MCPServer(client=JevClient(offline_mode=True))
-    req = {
-        "jsonrpc": "2.0",
-        "id": 3,
-        "method": "tools/call",
-        "params": {
-            "name": "jev_guard_command",
-            "arguments": {"command": "git status", "cwd": "/repo"},
-        },
-    }
-    resp = server.handle_request(req)
-    assert resp["result"]["isError"] is False
-    content_text = resp["result"]["content"][0]["text"]
-    data = json.loads(content_text)
-    assert data["allow_auto"] is True
-    assert data["safety_probability"] >= 0.95
+@pytest.mark.parametrize('name,args', [
+    ('jev_decide', {'state':'sample','questions':[{'id':'x','type':'unsupported','prompt':'q'}]}),
+    ('jev_decide', {'state':'sample','questions':[{'id':'x','type':'noul','prompt':'q'},{'id':'x','type':'noul','prompt':'q'}]}),
+    ('jev_decide', {'state':'sample','questions':{'x':{'type':'score','instructions':'q','criteria':[0,1]}}}),
+    ('jev_guard_command', {'command':44}),
+    ('jev_prune_output', {'raw_output':'a','current_goal':'g','max_retained_lines':True}),
+    ('jev_read_evidence', {'path':'x','goal':'g','max_bytes':65537}),
+    ('unknown', {}),
+])
+def test_invalid_arguments_are_protocol_errors(name, args):
+    Client = sdk()
+    from mcp.shared.exceptions import MCPError
+    async def check():
+        async with Client(create_sdk_server(MCPServer(JevClient(offline_mode=True)))) as client:
+            with pytest.raises(MCPError) as error:
+                await client.call_tool(name, args)
+            assert error.value.code == -32602
+            assert 'sample' not in str(error.value)
+    asyncio.run(check())
 
 
-def test_mcp_tool_call_prune_output():
-    server = MCPServer(client=JevClient(offline_mode=True))
-    lines = [f"test line {i}" for i in range(120)]
-    req = {
-        "jsonrpc": "2.0",
-        "id": 4,
-        "method": "tools/call",
-        "params": {
-            "name": "jev_prune_output",
-            "arguments": {
-                "raw_output": "\n".join(lines),
-                "current_goal": "fixing bug",
-                "max_retained_lines": 50,
-            },
-        },
-    }
-    resp = server.handle_request(req)
-    assert resp["result"]["isError"] is False
-    data = json.loads(resp["result"]["content"][0]["text"])
-    assert data["stats"]["pruned"] is True
+def test_offline_call_is_explicit_not_certification():
+    body = MCPServer(JevClient(offline_mode=True)).call_tool('jev_verify_completion', {
+        'goal':'all tests passed','recent_actions':'edited','last_output':'tests not run'})
+    assert body['status'] == 'offline' and 'is_complete' not in body
 
 
-def test_mcp_tool_call_decide():
-    server = MCPServer(client=JevClient(offline_mode=True))
-    req = {
-        "jsonrpc": "2.0",
-        "id": 5,
-        "method": "tools/call",
-        "params": {
-            "name": "jev_decide",
-            "arguments": {
-                "state": "COMMAND: git status",
-                "questions": [
-                    {"id": "q1", "prompt": "Is safe?", "type": "noul"},
-                    {"id": "q2", "prompt": "Category?", "type": "choice", "options": ["safe", "destructive"]},
-                ],
-            },
-        },
-    }
-    resp = server.handle_request(req)
-    assert resp["result"]["isError"] is False
-    data = json.loads(resp["result"]["content"][0]["text"])
-    assert "q1" in data["decisions"]
-    assert "q2" in data["decisions"]
+@pytest.mark.parametrize('configured', ['shadow', 'select'])
+def test_sdk_omitted_mode_matches_advertised_off_default(configured, tmp_path, monkeypatch):
+    Client = sdk()
+    from jev_decision import mcp, qualification
+    from jev_decision.runtime import RuntimeConfig
+
+    config = RuntimeConfig(home=tmp_path/'runtime', workspace_roots=(tmp_path,), enabled=True,
+                           selection_mode=configured, qualified_profile_path=tmp_path/'profile.json')
+    config.save()
+    monkeypatch.setenv('JEV_HOME', str(config.home))
+    def forbidden(*_args, **_kwargs):
+        pytest.fail('Omitted SDK mode acquired credentials or loaded a profile')
+    monkeypatch.setattr(mcp, 'JevClient', forbidden)
+    monkeypatch.setattr(qualification, 'load_qualification', forbidden)
+    evidence = tmp_path/'evidence.log'
+    source = 'INFO ordinary evidence record\n' * 130
+    evidence.write_bytes(source.encode())
+    async def check():
+        async with Client(create_sdk_server(MCPServer())) as client:
+            tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+            for name, args, field in (
+                ('jev_read_evidence', {'path':str(evidence), 'goal':'inspect'}, 'output'),
+                ('jev_prune_output', {'raw_output':source, 'current_goal':'inspect'}, 'pruned_output'),
+            ):
+                assert tools[name].input_schema['properties']['mode']['default'] == 'off'
+                result = (await client.call_tool(name, args)).structured_content
+                assert result[field] == source
+                assert result['stats']['mode'] == 'off' and result['stats']['calls'] == 0
+    asyncio.run(check())
+
+
+@pytest.mark.parametrize('mode', ['legacy', 'auto', '2026-07-28'])
+def test_real_sdk_stdio_client(mode, tmp_path):
+    Client = sdk()
+    from mcp.client.stdio import StdioServerParameters
+
+    from jev_decision.runtime import RuntimeConfig
+    config = RuntimeConfig(home=tmp_path/'runtime', workspace_roots=(tmp_path,), enabled=False)
+    config.save()
+    evidence = tmp_path/'unicode.log'
+    evidence.write_bytes('héllo 日本語 😀\r\nexit status 0\r\n'.encode('utf-8'))
+    params = StdioServerParameters(command=sys.executable, args=['-m','jev_decision.mcp'],
+        env={**os.environ,'JEV_HOME':str(config.home),'PYTHONIOENCODING':'cp1252'}, cwd=Path(__file__).resolve().parents[1])
+    async def check():
+        async with Client(params, mode=mode, read_timeout_seconds=10) as client:
+            tools = await client.list_tools()
+            assert len(tools.tools) == 6
+            status = await client.call_tool('jev_status', {})
+            assert status.structured_content['authenticated'] is False
+            assert status.structured_content['enabled'] is False
+            result = await client.call_tool('jev_read_evidence', {'path':str(evidence),'goal':'read Unicode','mode':'off'})
+            assert '日本語 😀' in result.structured_content['output']
+            result = await client.call_tool('jev_decide', {'state':'bonjour 日本語','questions': {
+                'label':{'type':'choice','instructions':'Choose one label','criteria':{'a':None,'b':None}}}})
+            assert not result.structured_content['decisions']
+            assert result.structured_content['attempts'] == 0
+    asyncio.run(check())
+
+
+def test_core_import_does_not_import_sdk():
+    completed = subprocess.run([sys.executable,'-c',
+        "import sys; import jev_decision; import jev_decision.cli; assert 'mcp' not in sys.modules; assert 'anyio' not in sys.modules"],
+        capture_output=True, timeout=10)
+    assert completed.returncode == 0, completed.stderr
+
+
+def test_cli_doctor_does_not_claim_authentication():
+    completed = subprocess.run([sys.executable,'-m','jev_decision.cli','doctor','--json'],
+        text=True, capture_output=True, timeout=10, check=True)
+    result = json.loads(completed.stdout)
+    assert result['authenticated'] is False
+    assert 'live_result' not in result
+
+
+def test_cli_invalid_input_is_content_free():
+    completed = subprocess.run([sys.executable,'-m','jev_decision.cli','decide'],
+        input='secret-sensitive-invalid-json', text=True, capture_output=True, timeout=10)
+    assert completed.returncode == 2
+    assert 'secret-sensitive' not in completed.stdout + completed.stderr
+
+
+def test_cli_explains_how_to_enable_a_fresh_installation(capsys):
+    from jev_decision.cli import main
+    assert main(["guard", "git status"]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["error_code"] == "runtime_disabled" and "jev setup" in result["hint"]
+
+
+@pytest.mark.parametrize('questions', [
+    {'x': {'type': 'noul', 'instructions': 'Is this a sample?'}},
+    [{'id': 'x', 'type': 'choice', 'prompt': 'Which kind?', 'options': ['a', 'b']}],
+    [{'id': 'x', 'type': 'score', 'instructions': 'How relevant?', 'scale': ['Unrelated', 'Related']}],
+])
+def test_compact_advertised_schema_still_accepts_every_supported_form(questions):
+    # Discovery advertises the compact array form to save model context; the
+    # server keeps validating native maps and legacy fields with the full schema.
+    Client = sdk()
+    from jev_decision.schemas import INPUT_VALIDATION_SCHEMAS
+    async def check():
+        async with Client(create_sdk_server(MCPServer(JevClient(offline_mode=True)))) as client:
+            result = await client.call_tool('jev_decide', {'state': 'sample', 'questions': questions})
+            assert result.structured_content['error_code'] == 'offline'
+            tools = {tool.name: tool for tool in (await client.list_tools()).tools}
+            assert len(json.dumps(tools['jev_decide'].input_schema)) < len(
+                json.dumps(INPUT_VALIDATION_SCHEMAS['jev_decide']))
+    asyncio.run(check())
+
+
+def test_cli_explains_a_zero_budget(capsys, tmp_path, monkeypatch):
+    from jev_decision.cli import main
+    from jev_decision.runtime import RuntimeConfig
+    RuntimeConfig(home=RuntimeConfig.load().home, daily_budget_usd=0).save()
+    assert main(["decide", "--file", str(Path(__file__).resolve().parents[1] / "examples/route.json")]) == 2
+    result = json.loads(capsys.readouterr().out)
+    assert result["error_code"] == "runtime_disabled" and "--daily-budget" in result["hint"]
+    assert main(["doctor", "--live", "--json"]) == 2
+    assert "--daily-budget" in json.loads(capsys.readouterr().out)["hint"]

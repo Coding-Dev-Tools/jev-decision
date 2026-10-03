@@ -1,187 +1,328 @@
-"""Unit tests for jev_decision primitives, fallbacks, live mock server, and harness guardrails."""
-
+"""Regressions for advisory authority and evidence preservation."""
 import json
 import threading
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import pytest
+import time
 
-from jev_decision import (
-    CalibrationTier,
-    ChoiceQuestion,
-    JevClient,
-    NoulQuestion,
-    ScoreQuestion,
-    classify_memory_relation,
+import pytest
+from test_qualification import WORKLOAD, qualified_documents
+
+from jev_decision import DecisionBatch, JevClient, ScoreDecision
+from jev_decision.evidence import read_evidence_file
+from jev_decision.harness_guards import (
+    MAX_WINDOW_BYTES,
+    _select_from_shadow,
     guard_bash_command,
     prune_tool_output,
     verify_turn_completion,
 )
 
 
-def test_primitives_serialization():
-    nq = NoulQuestion(id="q1", prompt="Is this safe?")
-    cq = ChoiceQuestion(id="q2", prompt="Choose category", options=["a", "b", "c"])
-    sq = ScoreQuestion(id="q3", prompt="Rate relevance", scale=[0, 1, 2, 3, 4])
-
-    assert nq.to_dict() == {"id": "q1", "type": "noul", "prompt": "Is this safe?"}
-    assert cq.to_dict() == {"id": "q2", "type": "choice", "prompt": "Choose category", "options": ["a", "b", "c"]}
-    assert sq.to_dict() == {"id": "q3", "type": "score", "prompt": "Rate relevance", "scale": [0, 1, 2, 3, 4]}
-
-
-def test_offline_fallback_safe_bash():
-    client = JevClient(offline_mode=True)
-
-    # Safe command: git status
-    res = guard_bash_command("git status", cwd="/repo", client=client)
-    assert res["allow_auto"] is True
-    assert res["escalate_to_user"] is False
-    assert res["safety_probability"] >= 0.95
-    assert res["is_fallback"] is True
-
-    # Safe command: pytest
-    res2 = guard_bash_command("pytest tests/test_core.py", client=client)
-    assert res2["allow_auto"] is True
-    assert res2["safety_probability"] >= 0.95
+class Scorer:
+    model = "jev-1.13.0"
+    def __init__(self, score=0.0, confidence=1.0, status="ok", delay=0):
+        self.calls = []
+        self.score, self.confidence, self.status, self.delay = score, confidence, status, delay
+        self.active = self.maximum_active = 0
+        self.lock = threading.Lock()
+    def evaluate(self, state, questions, *, deadline_monotonic=None):
+        with self.lock:
+            self.active += 1
+            self.maximum_active = max(self.maximum_active, self.active)
+            self.calls.append((state, questions, deadline_monotonic))
+        try:
+            if self.delay:
+                time.sleep(self.delay)
+            return DecisionBatch(status=self.status, source="provider" if self.status == "ok" else "none",
+                resolved_model=self.model, attempts=1, usage={"input_tokens": 100, "output_tokens": 20},
+                decisions={q.id: ScoreDecision(q.id, self.score, {}, self.confidence) for q in questions})
+        finally:
+            with self.lock:
+                self.active -= 1
 
 
-def test_offline_fallback_destructive_bash():
-    client = JevClient(offline_mode=True)
-
-    # Obvious destructive command: rm -rf /
-    res = guard_bash_command("rm -rf / --no-preserve-root", client=client)
-    assert res["allow_auto"] is False
-    assert res["escalate_to_user"] is True
-    assert res["safety_probability"] <= 0.05
-
-    # Force push
-    res_push = guard_bash_command("git push origin main --force", client=client)
-    assert res_push["allow_auto"] is False
-    assert res_push["escalate_to_user"] is True
+def log_text(count=150):
+    return "".join("INFO ordinary cache observation %d xxxxxxxxxxxx\n" % i for i in range(count))
 
 
-def test_context_pruning():
-    client = JevClient(offline_mode=True)
+def saved_evidence(tmp_path, raw):
+    path = tmp_path / "build.log"
+    path.write_bytes(raw.encode("utf-8"))
+    return read_evidence_file(str(path), "inspect", [str(tmp_path)], max_lines=10000, max_bytes=128 * 1024)
 
-    # 200 lines of repetitive output
-    lines = [f"Passing test item {i}: ok" for i in range(200)]
-    raw_output = "\n".join(lines)
+def test_missing_key_is_unavailable_not_safe():
+    client = JevClient(api_key="")
+    result = guard_bash_command("git status; delete-something", client=client)
+    assert result["status"] == "unavailable"
+    assert result["risk_probability"] is None
+    assert "allow_auto" not in result
+    assert result["permission_authority"] == "native_harness"
 
-    pruned, stats = prune_tool_output(raw_output, current_goal="fix auth bug", client=client, max_retained_lines=50)
-    assert stats["pruned"] is True
+def test_intentions_do_not_certify_unexecuted_tests():
+    result = verify_turn_completion("Ensure all tests passed", "edited file.py", "Tests not run yet",
+                                    client=JevClient(offline_mode=True))
+    assert result["status"] == "offline"
+    assert "is_complete" not in result
+    assert result["support_probability"] is None
+
+def test_explicit_offline_never_fabricates_provider_results():
+    batch = JevClient(offline_mode=True).evaluate("sample", {"q": {"type":"noul","instructions":"Is this text?"}})
+    assert batch.status == "offline"
+    assert batch.source != "provider"
+    assert not batch.decisions
+
+def test_windows_are_complete_batched_and_original_unchanged():
+    raw = "".join("INFO boilerplate line %d %s\n" % (i, "z" * 20) for i in range(125))
+    client = Scorer()
+    output, stats = prune_tool_output(raw, "find useful information", client=client, max_retained_lines=30,
+                                      mode="shadow", source_class="application_log")
+    assert output == raw
+    assert len(client.calls) == 1
+    state, questions, deadline = client.calls[0]
+    lines = raw.splitlines(keepends=True)
+    assert deadline is not None
+    for window in state["windows"].values():
+        assert window["text"] == "".join(lines[window["first_line"] - 1:window["last_line"]])
+    assert len(questions) <= 16
+    assert not stats["pruned"]
+    assert "token_savings_est" not in stats
+
+def test_protected_failure_and_summary_spans_survive_qualified_pruning(tmp_path):
+    lines = ["boilerplate %d xxxxxxxxxxxxxxxxxx\n" % i for i in range(125)]
+    lines[55] = "AssertionError: required result missing\n"
+    lines[82] = "45 tests passed; exit code 0\n"
+    raw = "".join(lines)
+    evidence = saved_evidence(tmp_path, raw)
+    profile, report = qualified_documents("test_log")
+    output, stats = prune_tool_output(raw, "debug issue", client=Scorer(), max_retained_lines=30,
+        mode="select", source_class="test_log", source_ref=evidence["source_ref"],
+        qualification=profile, qualification_report=report, expected_workload=WORKLOAD)
+    assert lines[55] in output and lines[82] in output
+    assert lines[0] in output and lines[-1] in output
     assert stats["saved_lines"] > 0
-    assert "lines of boilerplate/passing output omitted" in pruned
+    assert "recover from source" in output
+
+@pytest.mark.parametrize("client", [Scorer(confidence=0.2), Scorer(score=1.5), Scorer(status="unavailable")])
+def test_uncertainty_retains_every_line(client, tmp_path):
+    raw = log_text(125)
+    evidence = saved_evidence(tmp_path, raw)
+    profile, report = qualified_documents()
+    output, stats = prune_tool_output(raw, "inspect", client=client, mode="select", source_class="application_log",
+        source_ref=evidence["source_ref"], qualification=profile, qualification_report=report, expected_workload=WORKLOAD)
+    assert output == raw
+    assert not stats["pruned"]
+
+def test_large_windows_not_silently_truncated():
+    raw = "x" * 15000 + "\n" + "line\n" * 125
+    client = Scorer()
+    output, stats = prune_tool_output(raw, "inspect", client=client, mode="shadow", source_class="unknown")
+    assert output == raw and not client.calls
+    assert stats["status"] == "retained_unknown_format"
 
 
-def test_verification_completion():
-    client = JevClient(offline_mode=True)
-
-    # State with failure
-    res_fail = verify_turn_completion(
-        goal="Fix issue #123",
-        recent_actions="edited file.py",
-        last_output="AssertionError: 2 != 3",
-        client=client,
-    )
-    assert res_fail["is_complete"] is False
-
-    # State with all checks passed
-    res_ok = verify_turn_completion(
-        goal="Fix issue #123",
-        recent_actions="ran test",
-        last_output="100% green, 45 passed in 0.2s",
-        client=client,
-    )
-    assert res_ok["is_complete"] is True
+@pytest.mark.parametrize("mode,raw,source_class,status", [
+    ("off", log_text(), "application_log", "disabled"),
+    ("shadow", "INFO short\n", "application_log", "skipped_small_input"),
+    ("shadow", "1 test passed\n" * 150, "test_log", "retained_protected"),
+    ("shadow", "unrecognized prose\n" * 150, "unknown", "retained_unknown_format"),
+    ("shadow", "unrecognized prose\n" * 150, "application_log", "retained_unknown_format"),
+    ("shadow", "unrecognized prose\n" * 150, "test_log", "retained_unknown_format"),
+    ("shadow", "unrecognized prose\n" * 150, "build_log", "retained_unknown_format"),
+    ("shadow", "not JSON\n" * 150, "jsonl", "retained_unknown_format"),
+])
+def test_zero_call_bypasses(mode, raw, source_class, status):
+    client = Scorer()
+    output, stats = prune_tool_output(raw, "inspect", client=client, mode=mode, source_class=source_class)
+    assert output == raw and not client.calls and stats["status"] == status
+    assert stats["calls"] == 0 and "token_savings_est" not in stats
 
 
-def test_memory_relation_classification():
-    client = JevClient(offline_mode=True)
-
-    # Contradiction with negation
-    rel1 = classify_memory_relation(
-        new_fact="Do not use Postgres, use SQLite now",
-        existing_memory="Use Postgres for primary database",
-        client=client,
-    )
-    assert "contradict" in rel1
-
-    # Reinforcement
-    rel2 = classify_memory_relation(
-        new_fact="Engraphis stores memories in SQLite tables",
-        existing_memory="SQLite database is used for local memory storage in Engraphis",
-        client=client,
-    )
-    assert "reinforce" in rel2
-
-
-class MockJevHandler(BaseHTTPRequestHandler):
-    def do_POST(self):
-        content_len = int(self.headers.get("Content-Length", 0))
-        body = json.loads(self.rfile.read(content_len).decode("utf-8"))
-
-        # Verify Jev contract
-        assert "state" in body
-        assert "questions" in body
-
-        response_decisions = {}
-        for q in body["questions"]:
-            q_id = q["id"]
-            q_type = q["type"]
-            if q_type == "noul":
-                response_decisions[q_id] = {
-                    "type": "noul",
-                    "probability": 0.98,
-                    "confidence": 0.96,
-                }
-            elif q_type == "choice":
-                opts = q.get("options", ["opt1"])
-                response_decisions[q_id] = {
-                    "type": "choice",
-                    "selected": opts[0],
-                    "probabilities": {opts[0]: 0.95},
-                    "confidence": 0.95,
-                }
-            elif q_type == "score":
-                response_decisions[q_id] = {
-                    "type": "score",
-                    "score": 4,
-                    "probabilities": {"4": 0.9},
-                    "confidence": 0.9,
-                }
-
-        self.send_response(200)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        self.wfile.write(json.dumps({"decisions": response_decisions}).encode("utf-8"))
-
-    def log_message(self, format, *args):
-        pass  # Quiet logging in tests
+def test_incremental_windows_bounded_and_at_most_two_concurrent():
+    raw, client = log_text(1200), Scorer(delay=0.01)
+    output, stats = prune_tool_output(raw, "inspect", client=client, mode="shadow", source_class="application_log")
+    assert output == raw and len(client.calls) > 1 and stats["status"] == "ok"
+    assert 1 <= client.maximum_active <= 2
+    requested = {}
+    for state, questions, deadline in client.calls:
+        assert deadline is not None and len(questions) <= 16
+        payload = {"model": client.model, "state": state, "questions": {q.id: q.to_wire() for q in questions}}
+        assert len(json.dumps(payload).encode()) <= MAX_WINDOW_BYTES
+        requested.update(state["windows"])
+    source_lines = raw.splitlines(keepends=True)
+    cursor = 1
+    for span in stats["spans"]:
+        assert span["start_line"] == cursor
+        cursor = span["end_line"] + 1
+        if not span["protected"]:
+            window = requested["span_" + str(span["start_line"])]
+            assert window["text"] == "".join(source_lines[span["start_line"] - 1:span["end_line"]])
+            assert span["assessed"]
+    assert cursor == len(source_lines) + 1
 
 
-def test_mock_live_jev_api():
-    server = HTTPServer(("127.0.0.1", 0), MockJevHandler)
-    port = server.server_port
-    thread = threading.Thread(target=server.handle_request)
-    thread.daemon = True
-    thread.start()
+def test_select_requires_real_recovery_and_qualification(tmp_path):
+    raw, client = log_text(), Scorer()
+    output, stats = prune_tool_output(raw, "inspect", client=client, mode="select", source_class="application_log")
+    assert output == raw and not client.calls and stats["status"] == "retained_unrecoverable_source"
+    evidence = saved_evidence(tmp_path, raw)
+    output, stats = prune_tool_output(raw, "inspect", client=client, mode="select", source_class="application_log",
+                                      source_ref=evidence["source_ref"])
+    assert output == raw and not client.calls and stats["status"] == "retained_unqualified"
 
-    client = JevClient(
-        api_key="test-key-123",
-        base_url=f"http://127.0.0.1:{port}/v1/decide",
-        offline_mode=False,
-    )
 
-    questions = [
-        NoulQuestion("safe_q", "Is command safe?"),
-        ChoiceQuestion("cat_q", "Category", options=["safe", "destructive"]),
-        ScoreQuestion("rel_q", "Relevance", scale=[0, 1, 2, 3, 4]),
-    ]
+def test_complete_trace_and_hunk_survive_experimental_selection(tmp_path):
+    raw = (log_text(60) + "Traceback (most recent call last):\n" + "  File src/a.py:20\n" * 35 +
+           "ValueError: invalid value\n" + log_text(60) + "diff --git a/file b/file\n@@ -1,3 +1,3 @@\n" +
+           " retained context\n" * 40 + "+new line\n" + log_text(30))
+    evidence = saved_evidence(tmp_path, raw)
+    client = Scorer()
+    _, stats = prune_tool_output(raw, "inspect", client=client, mode="shadow", source_class="test_log")
+    calls = len(client.calls)
+    output, selected = _select_from_shadow(raw, stats, source_ref=evidence["source_ref"])
+    assert "Traceback (most recent call last):\n" + "  File src/a.py:20\n" * 35 + "ValueError: invalid value\n" in output
+    assert raw[raw.index("diff --git"):] in output
+    assert selected["pruned"] and selected["production_qualified"] is False and not stats["pruned"]
+    assert len(client.calls) == calls
 
-    batch = client.evaluate("git status", questions)
-    assert batch.is_fallback is False
-    assert batch.latency_ms > 0
-    assert batch.get_noul("safe_q").probability == 0.98
-    assert batch.get_choice("cat_q").selected == "safe"
-    assert batch.get_score("rel_q").score == 4
 
-    server.server_close()
+def test_whole_operation_deadline_retains_inflight_windows():
+    raw, client = log_text(1200), Scorer(delay=0.3)
+    started = time.monotonic()
+    output, stats = prune_tool_output(raw, "inspect", client=client, mode="shadow", source_class="application_log", deadline_s=0.04)
+    assert time.monotonic() - started < 0.25
+    assert output == raw and len(client.calls) <= 2 and not any(span["assessed"] for span in stats["spans"])
+    assert stats["usage"]["input_tokens"] is None
+
+
+def test_source_mutation_during_inference_prevents_omission(tmp_path):
+    raw = log_text()
+    evidence = saved_evidence(tmp_path, raw)
+    profile, report = qualified_documents()
+    class Mutating(Scorer):
+        def evaluate(self, *args, **kwargs):
+            (tmp_path / "build.log").write_text("changed", encoding="utf-8")
+            return super().evaluate(*args, **kwargs)
+    output, stats = prune_tool_output(raw, "inspect", client=Mutating(), mode="select", source_class="application_log",
+        source_ref=evidence["source_ref"], qualification=profile, qualification_report=report, expected_workload=WORKLOAD)
+    assert output == raw and stats["status"] == "retained_source_changed" and not stats["pruned"]
+
+
+def test_prefixed_stack_frames_are_protected_beyond_fixed_line_chunks(tmp_path):
+    trace = "INFO Traceback (most recent call last):\n" + "INFO   File src/parser.py:37\n" * 60
+    raw = log_text(60) + trace + "INFO AssertionError: wrong result\n" + log_text(60)
+    evidence = saved_evidence(tmp_path, raw)
+    _, stats = prune_tool_output(raw, "inspect", client=Scorer(), mode="shadow", source_class="application_log")
+    output, _ = _select_from_shadow(raw, stats, source_ref=evidence["source_ref"])
+    assert trace in output
+
+
+def test_jsonl_records_are_complete_and_protected_evidence_survives(tmp_path):
+    records = [json.dumps({"kind": "observation", "value": "x" * 80, "n": i}) + "\n" for i in range(150)]
+    records[70] = json.dumps({"kind": "error", "actual": 3, "expected": 4}) + "\n"
+    raw = "".join(records)
+    evidence = saved_evidence(tmp_path, raw)
+    _, stats = prune_tool_output(raw, "inspect", client=Scorer(), mode="shadow", source_class="jsonl")
+    output, _ = _select_from_shadow(raw, stats, source_ref=evidence["source_ref"])
+    assert records[70] in output
+    for line in output.splitlines():
+        if not line.startswith("[Jev omitted"):
+            assert isinstance(json.loads(line), dict)
+
+def test_file_evidence_redacts_and_preserves_source(tmp_path):
+    original = b"api_key=secret-test-value\nbuild information\n"
+    path = tmp_path / "build.log"
+    path.write_bytes(original)
+    result = read_evidence_file(str(path), "inspect", [str(tmp_path)], client=Scorer())
+    assert "secret-test-value" not in result["output"]
+    assert result["redacted"]
+    assert path.read_bytes() == original
+
+def test_file_evidence_redacts_registry_tokens_before_scoring(tmp_path):
+    original = ("//registry.npmjs.org/:_authToken=npm_synthetic123456789\r\n"
+                "INFO _auth=opaque-registry-canary\r\n"
+                "INFO apikey_synthetic1234567890123456\r\n" + log_text(150))
+    path = tmp_path / "build.log"
+    path.write_bytes(original.encode("utf-8"))
+    client = Scorer()
+    result = read_evidence_file(str(path), "inspect", [str(tmp_path)], mode="shadow",
+                                source_class="application_log", client=client)
+    assert result["output"].splitlines()[:3] == [
+        '//registry.npmjs.org/:_authToken="[REDACTED]"',
+        'INFO _auth="[REDACTED]"', 'INFO [REDACTED]']
+    assert result["output"].count("\r\n") == 3 and client.calls
+    assert path.read_bytes() == original.encode("utf-8")
+    for value in ("npm_synthetic", "opaque-registry-canary", "apikey_synthetic"):
+        assert value not in result["output"] and value not in str(client.calls)
+
+
+@pytest.mark.parametrize("changes", [{"error_code": "timeout"}, {"is_fallback": True},
+                                    {"requested_model": "jev-stale"}, {"source": "heuristic"}])
+@pytest.mark.parametrize("mode", ["shadow", "select"])
+def test_failed_injected_scores_never_allow_evidence_omission(tmp_path, changes, mode):
+    from dataclasses import replace
+    class StaleScorer(Scorer):
+        def evaluate(self, *args, **kwargs):
+            return replace(super().evaluate(*args, **kwargs), **changes)
+    raw = log_text(150)
+    evidence = saved_evidence(tmp_path, raw)
+    options = {}
+    if mode == "select":
+        profile, report = qualified_documents()
+        options.update(qualification=profile, qualification_report=report, expected_workload=WORKLOAD)
+    output, stats = prune_tool_output(raw, "inspect", client=StaleScorer(), mode=mode,
+        source_class="application_log", source_ref=evidence["source_ref"], **options)
+    assert output == raw and not stats["pruned"] and stats["calls"] > 0
+    assert not any(span.get("assessed") for span in stats["spans"])
+
+def test_file_evidence_denies_secrets_and_escape(tmp_path):
+    for name in [".env", "credentials.json", "private.key"]:
+        path = tmp_path / name
+        path.write_text("content")
+        with pytest.raises(ValueError):
+            read_evidence_file(str(path), "inspect", [str(tmp_path)])
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    approved = tmp_path / "approved"
+    approved.mkdir()
+    target = outside / "build.log"
+    target.write_text("content")
+    with pytest.raises(ValueError, match="outside_approved"):
+        read_evidence_file(str(approved / ".." / "outside" / "build.log"), "inspect", [str(approved)])
+
+@pytest.mark.parametrize("ancestor", ["auth-service", "oauth_app", "secrets-manager", "token.bridge"])
+def test_private_name_screen_starts_below_the_approved_root(tmp_path, ancestor):
+    # Operators commonly keep projects under names like auth-service/. The
+    # Generic private words in ancestors are allowed; hard credential paths are not.
+    root = tmp_path / ancestor / "workspace"
+    (root / "run").mkdir(parents=True)
+    (root / "run" / "stdout.log").write_bytes(b"collected 3 items\n")
+    result = read_evidence_file(str(root / "run" / "stdout.log"), "inspect", [str(root)])
+    assert result["status"] == "ok" and result["output"] == "collected 3 items\n"
+    for relative in (".env", ".git/config", "secrets/run.log", "run/credentials.json", "keys/server.pem"):
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("content")
+        with pytest.raises(ValueError, match="credential_or_private_file_denied"):
+            read_evidence_file(str(path), "inspect", [str(root)])
+
+@pytest.mark.parametrize("ancestor", [".ssh", ".kube", ".aws", ".docker", "secrets", "credentials"])
+def test_approved_root_cannot_exempt_hard_credential_directories(tmp_path, ancestor):
+    root = tmp_path / ancestor / "workspace"
+    root.mkdir(parents=True)
+    path = root / "run.log"
+    path.write_text("private content")
+    with pytest.raises(ValueError, match="credential_or_private_file_denied"):
+        read_evidence_file(str(path), "inspect", [str(root)])
+
+
+def test_file_evidence_denies_symlink_escape(tmp_path):
+    approved = tmp_path / "approved"
+    approved.mkdir()
+    outside = tmp_path / "outside.log"
+    outside.write_text("private")
+    link = approved / "build.log"
+    try:
+        link.symlink_to(outside)
+    except OSError:
+        pytest.skip("symlink privilege unavailable")
+    with pytest.raises(ValueError, match="outside_approved"):
+        read_evidence_file(str(link), "inspect", [str(approved)])
