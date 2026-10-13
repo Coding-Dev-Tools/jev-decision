@@ -92,6 +92,30 @@ def noul():
     return [NoulQuestion("q", "Does the excerpt report an error?")]
 
 
+@pytest.mark.parametrize("question_id", [
+    "sk-synthetic123456789", "npm_synthetic123456789", "password=synthetic",
+    "apikey_synthetic1234567890123456", KEY,
+])
+def test_secret_bearing_question_ids_fail_before_reservation(make_client, question_id):
+    client, ledger = make_client(transport=lambda *args: pytest.fail("Must not transmit"))
+    result = client.evaluate("sanitized excerpt", [NoulQuestion(question_id, "Is it relevant?")])
+    assert result.status == "unavailable" and result.error_code == "invalid_request"
+    assert result.attempts == 0 and ledger.reservations == []
+    assert question_id not in json.dumps(result.to_dict())
+
+
+@pytest.mark.parametrize("requested, returned, valid", [(1, True, False), (False, 0, False), (1, 1.0, True)])
+def test_structured_legend_preserves_json_types(make_client, requested, returned, valid):
+    def transport(request, *args):
+        response = response_for(request)
+        response["answers"]["q"]["legend"]["1"]["rank"] = returned
+        return wire(response)
+    client, _ = make_client(transport=transport)
+    result = client.evaluate("excerpt", [ScoreQuestion("q", "Rate evidence quality.",
+        criteria=["Absent evidence", {"description": "Present evidence", "rank": requested}])])
+    assert (result.status == "ok") is valid
+
+
 def test_native_contract_and_fractional_score(make_client):
     captured = []
 
@@ -283,6 +307,50 @@ def test_sanitized_request_and_detached_cache(make_client):
     assert original["password"] == "private-example"
 
 
+def test_score_rubrics_are_caller_local_with_sanitized_cache(make_client):
+    requests = []
+
+    def transport(request, *_):
+        requests.append(request.data)
+        return wire(response_for(request))
+
+    client, ledger = make_client(transport)
+    first_criteria = [{"description": "Low quality", "password": "synthetic-one"},
+                      {"description": "High quality", "rank": 1}]
+    second_criteria = copy.deepcopy(first_criteria)
+    second_criteria[0]["password"] = "synthetic-two"
+    first = client.evaluate("evidence", [ScoreQuestion("q", "Rate quality", criteria=first_criteria)])
+    assert first.status == "ok" and first.source == "provider"
+    assert first.get_score("q").legend == {str(i): v for i, v in enumerate(first_criteria)}
+    first.get_score("q").legend["0"]["description"] = "changed result"
+    assert first_criteria[0]["description"] == "Low quality"
+    second = client.evaluate("evidence", [ScoreQuestion("q", "Rate quality", criteria=second_criteria)])
+    assert second.status == "ok" and second.source == "cache"
+    assert second.get_score("q").legend == {str(i): v for i, v in enumerate(second_criteria)}
+    second.get_score("q").legend["0"]["password"] = "changed result"
+    third = client.evaluate("evidence", [ScoreQuestion("q", "Rate quality", criteria=second_criteria)])
+    assert third.get_score("q").legend["0"]["password"] == "synthetic-two"
+    assert len(requests) == 1 and ledger.reservations == [1]
+    assert second.usage == {"input_tokens": 0, "output_tokens": 0}
+    assert second.attempts == 0
+    for value in ("synthetic-one", "synthetic-two"):
+        assert value.encode() not in requests[0]
+        assert value not in json.dumps(next(iter(client._cache.values())).to_dict())
+
+
+@pytest.mark.parametrize("criterion", [
+    "Contains " + KEY, {"description": "Absent evidence", "nested": [KEY]},
+    {KEY: "Absent evidence"},
+])
+def test_score_rubric_never_returns_active_credential(make_client, criterion):
+    client, ledger = make_client(transport=lambda *args: pytest.fail("Must not transmit"))
+    result = client.evaluate("evidence", [ScoreQuestion("q", "Rate quality",
+                             criteria=[criterion, "Strong evidence"])])
+    assert result.status == "unavailable" and result.error_code == "invalid_request"
+    assert result.attempts == 0 and ledger.reservations == []
+    assert KEY not in json.dumps(result.to_dict())
+
+
 def test_transient_retry_reserves_every_attempt(make_client):
     calls = []
 
@@ -304,6 +372,7 @@ def test_transient_retry_reserves_every_attempt(make_client):
     (403, "authentication_error", 1),
     (429, "rate_limited", 2),
     (503, "provider_error", 2),
+    (529, "provider_error", 2),
 ])
 def test_http_failure_content_is_never_exposed(make_client, status, code, retries, caplog):
     client, ledger = make_client(lambda *_: (status, (KEY + " provider echo").encode()))

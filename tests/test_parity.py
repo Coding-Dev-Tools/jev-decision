@@ -29,8 +29,14 @@ def materialize(spec):
 
 def normalized_result(spec):
     body = materialize(spec)
+    questions = copy.deepcopy(FIXTURE["questions"])
+    for patch in spec.get("question_patches", []):
+        target = questions
+        for key in patch["path"][:-1]:
+            target = target[key]
+        target[patch["path"][-1]] = copy.deepcopy(patch["value"])
     client = JevClient(api_key="fixture-only-not-a-real-key", transport=lambda *args: (200, body))
-    result = client.evaluate(FIXTURE["state"], FIXTURE["questions"]).to_dict()
+    result = client.evaluate(FIXTURE["state"], questions).to_dict()
     result.pop("latency_ms")
     result.pop("request_id")
     return result

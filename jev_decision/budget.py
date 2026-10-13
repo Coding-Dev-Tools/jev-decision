@@ -14,7 +14,7 @@ from typing import Any, Callable, Dict, Optional
 from .runtime import RuntimeConfig
 
 MAX_TOKENS_PER_ATTEMPT = 64_000
-NANODOLLARS_PER_TOKEN = 42  # $0.042 per million total tokens.
+NANODOLLARS_PER_TOKEN = 42  # $0.042 per million input tokens; outputs are free.
 RESERVATION_NANODOLLARS = MAX_TOKENS_PER_ATTEMPT * NANODOLLARS_PER_TOKEN
 NANODOLLARS_PER_DOLLAR = 1_000_000_000
 

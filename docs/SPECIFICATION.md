@@ -14,7 +14,7 @@ Risk assessments never grant execution permission. Evidence assessments never ce
 
 ## Evidence selection
 
-Saved UTF-8 evidence can be read through approved workspace roots. Resolve and check paths, reject sensitive names, enforce byte limits, sanitize excerpts, and retain original SHA-256 and source line locations. Large windows that exceed provider bounds remain available locally rather than being truncated into misleading evidence. All bounded windows are assessed together against complete shared state.
+Saved UTF-8 evidence can be read through approved workspace roots. Check both the requested path and the opened handle's final path before reading, reject sensitive names, enforce byte limits on the opened regular file, sanitize excerpts, and retain original SHA-256 and source line locations. Large windows that exceed provider bounds remain available locally rather than being truncated into misleading evidence. All bounded windows are assessed together against complete shared state.
 
 Pruning is off by default. Even when explicitly enabled after calibration, uncertain assessments retain content. Failure details, test summaries, exit codes, diff boundaries and original artifacts remain protected. Actual token savings require primary-model telemetry; byte counts are not tokens. A tool cannot remove text already consumed by a model.
 
@@ -22,7 +22,7 @@ Pruning is off by default. Even when explicitly enabled after calibration, uncer
 
 The shared allowance is $1 per America/New_York calendar day. A request reserves $0.002688, derived from 64,000 input tokens at $0.042 per million. SQLite immediate transactions serialize reservations across processes. Crashes and unknown usage retain the reservation. Day rollover uses New York calendar boundaries, including DST. Provider billing remains separately unknown.
 
-The default five-second evaluation deadline includes no more than two attempts. Requests and responses are size bounded. Redirects and endpoint overrides are rejected. Identical successful requests can be reused only in the same client session. Existing MCP processes must restart after credential or policy changes. Separate JEV_HOME directories, unmanaged provider SDKs and standalone TypeScript clients are outside the managed shared ledger.
+The default five-second evaluation deadline includes no more than two attempts. Requests and responses are size bounded. Redirects and endpoint overrides are rejected. Identical successful requests can be reused only in the same client session. Existing MCP processes must restart after credential or policy changes. A managed runtime ignores inherited JEV_HOME in favor of its installed home marker. Unmanaged installations, provider SDKs and standalone TypeScript clients are outside the managed shared ledger.
 
 ## MCP and installation
 

@@ -39,6 +39,29 @@ def test_defaults_do_not_create_state(isolated_runtime):
     assert config.workspace_roots == ()
 
 
+def test_installed_home_marker_overrides_inherited_home(tmp_path, monkeypatch):
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    shared = tmp_path / "shared"
+    (installed / "jev-runtime-home.txt").write_text(str(shared), encoding="utf-8")
+    monkeypatch.setattr(sys, "prefix", str(installed))
+    monkeypatch.setenv("JEV_HOME", str(tmp_path / "separate"))
+    config = RuntimeConfig.load()
+    assert config.home == shared
+    assert config.ledger_path == shared / "budget.sqlite3"
+    assert not shared.exists()
+
+
+def test_invalid_installed_marker_never_falls_back_to_environment(tmp_path, monkeypatch):
+    installed = tmp_path / "installed"
+    installed.mkdir()
+    (installed / "jev-runtime-home.txt").write_text("relative-home", encoding="utf-8")
+    monkeypatch.setattr(sys, "prefix", str(installed))
+    monkeypatch.setenv("JEV_HOME", str(tmp_path / "separate"))
+    with pytest.raises(RuntimeConfigError):
+        RuntimeConfig.load()
+
+
 def test_public_config_atomic_roundtrip(isolated_runtime, tmp_path):
     config = RuntimeConfig(home=isolated_runtime.home, workspace_roots=(tmp_path,), daily_budget_usd=Decimal("0.25"))
     config.save()
@@ -325,6 +348,15 @@ def test_excerpt_redacts_recognizable_credentials():
     for secret in ("some password", "pword", "alice", "123456789abcdef", "secret body"):
         assert secret not in clean
     assert '"ok": true' in clean
+
+
+def test_package_registry_and_typesafe_redaction():
+    text = '//registry.npmjs.org/:_authToken=npm_synthetic123456789\n' \
+        '_auth=opaque-registry-canary\napikey_synthetic1234567890123456'
+    clean = policy.sanitize(text)
+    assert "synthetic" not in clean and "opaque-registry-canary" not in clean
+    clean_state = policy.sanitize_state({"_authToken": "opaque-value", "_auth": "opaque-value"})
+    assert "opaque-value" not in json.dumps(clean_state)
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), {1: "bad"}, {"bad": object()}])

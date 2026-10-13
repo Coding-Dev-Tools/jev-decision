@@ -5,7 +5,7 @@ import json
 import sys
 from typing import Any, Dict, Optional
 
-from .client import JevClient, _decode, validate_state
+from .client import MAX_QUESTIONS, JevClient, _decode, validate_state
 from .harness_guards import guard_bash_command, prune_tool_output, verify_turn_completion
 from .primitives import ChoiceQuestion, NoulQuestion, ScoreQuestion
 
@@ -21,6 +21,70 @@ def _tool(name, description, properties, required=(), network=True):
             "annotations": {"readOnlyHint": True, "destructiveHint": False, "openWorldHint": network, "idempotentHint": not network}}
 
 _STR = {"type": "string"}
+_QUESTION_TEXT = {"type": "string", "minLength": 1, "pattern": r"\S"}
+
+
+def _question_schema(kind, criteria=None, criteria_required=False):
+    """Advertise one unambiguous question representation to tool-using models."""
+    properties = {
+        "id": dict(_QUESTION_TEXT, maxLength=200,
+                   description="Unique ID within this array; identifies the returned answer."),
+        "type": {"type": "string", "enum": [kind]},
+        "instructions": dict(_QUESTION_TEXT,
+                             description="One complete, focused question about the supplied state."),
+    }
+    required = ["id", "type", "instructions"]
+    if criteria is not None:
+        properties["criteria"] = criteria
+        if criteria_required:
+            required.append("criteria")
+    return {"type": "object", "properties": properties, "required": required,
+            "additionalProperties": False}
+
+
+_CANONICAL_QUESTIONS = {
+    "type": "array",
+    "minItems": 1,
+    "maxItems": MAX_QUESTIONS,
+    "description": (
+        "A JSON array of question objects, never an escaped JSON string. "
+        "Each question needs a unique id, type, and instructions. "
+        "Choice and Score also require descriptive criteria."
+    ),
+    "items": {
+        "type": "object",
+        "anyOf": [
+            _question_schema("noul", {
+                "type": "object", "minProperties": 1,
+                "properties": {"true": _QUESTION_TEXT, "false": _QUESTION_TEXT},
+                "additionalProperties": False,
+                "description": "Optional descriptions of what a true or false answer means.",
+            }),
+            _question_schema("choice", {
+                "type": "object", "minProperties": 2, "maxProperties": 255,
+                "propertyNames": _QUESTION_TEXT,
+                "additionalProperties": _QUESTION_TEXT,
+                "description": "Map each possible answer label to a concrete description.",
+            }, criteria_required=True),
+            _question_schema("score", {
+                "type": "array", "minItems": 2, "maxItems": 10, "uniqueItems": True,
+                "items": _QUESTION_TEXT,
+                "description": (
+                    "Ordered descriptive levels from low to high, not numeric labels. "
+                    "The returned score is a possibly fractional position between these levels."
+                ),
+            }, criteria_required=True),
+        ],
+    },
+    "examples": [[
+        {"id": "failure", "type": "noul", "instructions": "Does the excerpt report a failed check?"},
+        {"id": "kind", "type": "choice", "instructions": "What does the excerpt primarily report?",
+         "criteria": {"failure": "A check failed", "success": "A check passed"}},
+        {"id": "relevance", "type": "score", "instructions": "How relevant is the excerpt to the stated goal?",
+         "criteria": ["Unrelated detail", "Useful context", "Required evidence"]},
+    ]],
+}
+
 TOOLS_MANIFEST = [
     _tool("jev_status", "Report local configuration, credential presence and shared budget. Makes no provider call.", {}, network=False),
     _tool("jev_guard_command", "Advisory classification of an ambiguous command's effects. Never grants execution permission. Skip routine known commands.",
@@ -32,8 +96,12 @@ TOOLS_MANIFEST = [
           ["raw_output", "current_goal"]),
     _tool("jev_read_evidence", "Read and score a saved UTF-8 log before loading it into model context. Only configured workspace roots; secret files denied; originals retained.",
           {"path": _STR, "goal": _STR, "max_retained_lines": {"type": "integer", "minimum": 1}}, ["path", "goal"]),
-    _tool("jev_decide", "Ask a small batch of atomic typed questions about minimal sanitized state. Use Choice, Score or Noul. Advisory only; budgeted.",
-          {"state": {"type": ["string", "object", "array"]}, "questions": {"type": ["object", "array"]}},
+    _tool("jev_decide", "Ask a small batch of atomic typed questions about minimal sanitized state. Pass an object state and an array of question objects, not JSON-encoded strings. Use Choice, Score or Noul. Advisory only; budgeted.",
+          {"state": {
+              "type": "object", "minProperties": 1, "additionalProperties": True,
+              "description": "A JSON object containing only the relevant facts or excerpts; do not encode it as a string.",
+              "examples": [{"excerpt": "FAILED: one authentication check", "goal": "Find the failed check"}],
+          }, "questions": _CANONICAL_QUESTIONS},
           ["state", "questions"]),
 ]
 

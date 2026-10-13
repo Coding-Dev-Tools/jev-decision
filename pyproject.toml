@@ -23,7 +23,7 @@ jev = "jev_decision.cli:main"
 jev-mcp = "jev_decision.mcp:main"
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "jsonschema>=4,<5"]
 
 [tool.setuptools.packages.find]
 include = ["jev_decision*"]

@@ -164,10 +164,45 @@ def _distribution(value: Any, keys: Any) -> Dict[str, float]:
     if not isinstance(value, dict) or set(value) != set(keys):
         raise ValueError("invalid_probability_keys")
     probabilities = {key: _probability(item) for key, item in value.items()}
-    if not math.isclose(math.fsum(probabilities.values()), 1.0,
-                        abs_tol=PROBABILITY_TOLERANCE, rel_tol=0):
+    total = math.fsum(probabilities.values())
+    bounds = _rounded_bounds(probabilities)
+    rounded_valid = bounds is not None and total > 0 and (
+        math.fsum(pair[0] for pair in bounds.values()) <= 1 + 1e-9
+        and math.fsum(pair[1] for pair in bounds.values()) >= 1 - 1e-9)
+    if not math.isclose(total, 1.0, abs_tol=PROBABILITY_TOLERANCE, rel_tol=0) and not rounded_valid:
         raise ValueError("invalid_probability_sum")
     return probabilities
+
+
+def _rounded_bounds(probabilities: Dict[str, float]) -> Optional[Dict[str, Tuple[float, float]]]:
+    """Observed native responses independently round displayed values to 2dp.
+
+    Preserve the wire values. Do not renormalize them or treat the displayed
+    weighted sum as an exact reconstruction of the provider's internal score.
+    """
+    if not all(abs(value * 100 - round(value * 100)) <= 1e-8 for value in probabilities.values()):
+        return None
+    return {key: (max(0.0, value - 0.005), min(1.0, value + 0.005))
+            for key, value in probabilities.items()}
+
+
+def _consistent_score(score: float, probabilities: Dict[str, float]) -> bool:
+    bounds = _rounded_bounds(probabilities)
+    if bounds is None:
+        weighted = math.fsum(int(key) * value for key, value in probabilities.items())
+        return math.isclose(score, weighted, abs_tol=PROBABILITY_TOLERANCE, rel_tol=0)
+    lower = math.fsum(pair[0] for pair in bounds.values())
+    if lower > 1 + 1e-9 or math.fsum(pair[1] for pair in bounds.values()) < 1 - 1e-9:
+        return False
+    def extreme(reverse: bool) -> float:
+        remaining = max(0.0, 1 - lower)
+        value = math.fsum(int(key) * pair[0] for key, pair in bounds.items())
+        for key in sorted(bounds, key=int, reverse=reverse):
+            amount = min(remaining, bounds[key][1] - bounds[key][0])
+            value += int(key) * amount
+            remaining -= amount
+        return value
+    return score + 0.005 >= extreme(False) - 1e-9 and score - 0.005 <= extreme(True) + 1e-9
 
 
 def _usage(payload: Dict[str, Any]) -> Dict[str, Optional[int]]:
@@ -180,6 +215,19 @@ def _usage(payload: Dict[str, Any]) -> Dict[str, Optional[int]]:
         if type(value) is int and value >= 0:
             result[name] = value
     return result
+
+
+def _json_equal(left: Any, right: Any) -> bool:
+    """JSON numbers may be equivalent; a boolean is never a number."""
+    if type(left) in (int, float) and type(right) in (int, float):
+        return left == right
+    if type(left) is not type(right):
+        return False
+    if isinstance(left, dict):
+        return left.keys() == right.keys() and all(_json_equal(left[key], right[key]) for key in left)
+    if isinstance(left, list):
+        return len(left) == len(right) and all(_json_equal(a, b) for a, b in zip(left, right))
+    return left == right
 
 
 def validate_response(payload: Any, questions: Dict[str, Any], model: str) -> Dict[str, Decision]:
@@ -219,14 +267,13 @@ def validate_response(payload: Any, questions: Dict[str, Any], model: str) -> Di
             decisions[question_id] = ChoiceDecision(question_id, selected, probabilities, confidence)
         else:
             legend = {str(index): level for index, level in enumerate(question["criteria"])}
-            if answer["legend"] != legend:
+            if not _json_equal(answer["legend"], legend):
                 raise ValueError("invalid_legend")
             probabilities = _distribution(answer["probabilities"], legend)
             score = answer["score"]
             if not _finite(score) or not 0 <= score <= len(legend) - 1:
                 raise ValueError("invalid_score")
-            weighted = math.fsum(int(key) * value for key, value in probabilities.items())
-            if not math.isclose(score, weighted, abs_tol=PROBABILITY_TOLERANCE, rel_tol=0):
+            if not _consistent_score(score, probabilities):
                 raise ValueError("score_probability_mismatch")
             decisions[question_id] = ScoreDecision(
                 question_id, float(score), probabilities, confidence, copy.deepcopy(legend),
@@ -347,7 +394,7 @@ def _http_error(status: int) -> Tuple[str, bool]:
         return "timeout", True
     if status == 429:
         return "rate_limited", True
-    return "provider_error", status in (500, 502, 503, 504)
+    return "provider_error", status in (500, 502, 503, 504, 529)
 
 
 class JevClient:
@@ -429,6 +476,17 @@ class JevClient:
         started = time.monotonic()
         requested_model = model or self.model
         batch = DecisionBatch(requested_model=requested_model, request_id=str(uuid.uuid4()))
+        score_rubrics: Dict[str, Any] = {}
+
+        def restore_rubrics(result: DecisionBatch) -> DecisionBatch:
+            # Only the wire representation belongs in the cache. Restore each
+            # caller's detached metadata after validation and cache insertion.
+            for question_id, criteria in score_rubrics.items():
+                decision = result.decisions.get(question_id)
+                if isinstance(decision, ScoreDecision):
+                    decision.legend = {str(i): copy.deepcopy(value)
+                                       for i, value in enumerate(criteria)}
+            return result
 
         def finish(error: Optional[str] = None) -> DecisionBatch:
             batch.error_code = error
@@ -449,10 +507,23 @@ class JevClient:
         if requested_model != self.model:
             return finish("invalid_request")
         try:
-            from .policy import sanitize_state
+            from .policy import sanitize_excerpt, sanitize_state
 
             validate_state(state)
             checked = normalize_questions(questions)
+            score_rubrics = {question_id: copy.deepcopy(question["criteria"])
+                            for question_id, question in checked.items()
+                            if question["type"] == "score"}
+            # Caller metadata may be returned locally, but must never echo the
+            # active transport credential, even if supplied as rubric text.
+            if json.dumps(self._api_key, ensure_ascii=False)[1:-1] in json.dumps(
+                    score_rubrics, ensure_ascii=False):
+                return finish("invalid_request")
+            # Correlation labels need no secrets. Reject before reservation or
+            # transmission instead of exposing them or silently changing IDs.
+            if any(sanitize_excerpt(question_id, secrets=(self._api_key,)) != question_id
+                   for question_id in checked):
+                return finish("invalid_request")
             # Sanitize all string-bearing request values, including instructions.
             clean_state = sanitize_state(state, secrets=(self._api_key,))
             checked = normalize_questions({
@@ -482,7 +553,7 @@ class JevClient:
                 batch.attempts = 0
                 batch.request_id = str(uuid.uuid4())
                 batch.usage = {"input_tokens": 0, "output_tokens": 0}
-                return finish()
+                return restore_rubrics(finish())
 
         deadline = started + self.timeout_s
         # Leave room for the bounded SQLite settlement after HTTP completes.
@@ -579,7 +650,7 @@ class JevClient:
                         self._cache.move_to_end(fingerprint)
                         while len(self._cache) > self._cache_size:
                             self._cache.popitem(last=False)
-                return batch
+                return restore_rubrics(batch)
             if not retryable or attempt or deadline - time.monotonic() <= 0.05:
                 return finish(error)
             time.sleep(min(0.05, max(0.0, deadline - time.monotonic())))

@@ -24,15 +24,17 @@ class RuntimeConfigError(ValueError):
 
 def _default_home() -> Path:
     override = os.environ.get("JEV_HOME")
-    if override:
-        result = Path(override).expanduser()
-    elif (Path(sys.prefix) / "jev-runtime-home.txt").is_file():
+    if (Path(sys.prefix) / "jev-runtime-home.txt").is_file():
         # A built runtime carries a non-secret physical home reference. This
         # keeps MSIX-redirected desktop and ordinary CLI processes on one ledger.
         marker = Path(sys.prefix) / "jev-runtime-home.txt"
         if marker.stat().st_size > 4096:
             raise RuntimeConfigError("Invalid installed runtime home reference")
         result = Path(marker.read_text(encoding="utf-8-sig").strip())
+    elif override:
+        # Source/unmanaged installations may select a home. An immutable managed
+        # runtime must always share its installed ledger, even in inherited envs.
+        result = Path(override).expanduser()
     elif os.environ.get("LOCALAPPDATA"):
         result = Path(os.environ["LOCALAPPDATA"]) / "JevDecision"
     elif os.name == "nt":

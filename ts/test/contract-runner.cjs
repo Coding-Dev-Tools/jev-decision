@@ -24,7 +24,13 @@ async function runCorpus() {
       apiKey: "fixture-only-not-a-real-key",
       fetchImpl: async () => new Response(materialize(spec), { status: 200, headers: { "content-type": "application/json" } }),
     });
-    const result = await client.evaluate(fixture.state, fixture.questions);
+    const questions = structuredClone(fixture.questions);
+    for (const patch of spec.question_patches ?? []) {
+      let target = questions;
+      for (const key of patch.path.slice(0, -1)) target = target[key];
+      target[patch.path.at(-1)] = structuredClone(patch.value);
+    }
+    const result = await client.evaluate(fixture.state, questions);
     // Only elapsed time and random correlation ID vary across implementations.
     const { latency_ms, request_id, ...normalized } = result;
     results[spec.name] = normalized;

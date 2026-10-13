@@ -87,7 +87,8 @@ def test_file_evidence_redacts_and_preserves_source(tmp_path):
     assert path.read_bytes() == original
 
 def test_file_evidence_denies_secrets_and_escape(tmp_path):
-    for name in [".env", "credentials.json", "private.key"]:
+    for name in [".env", "credentials.json", "private.key", ".npmrc", ".pypirc", ".netrc",
+                 "_netrc", ".git-credentials", "id_rsa", "id_ed25519", "vault.dpapi"]:
         path = tmp_path / name
         path.write_text("content")
         with pytest.raises(ValueError):
@@ -113,3 +114,33 @@ def test_file_evidence_denies_symlink_escape(tmp_path):
         pytest.skip("symlink privilege unavailable")
     with pytest.raises(ValueError, match="outside_approved"):
         read_evidence_file(str(link), "inspect", [str(approved)])
+
+
+def test_file_evidence_checks_open_handle_before_read(tmp_path, monkeypatch):
+    from pathlib import Path
+    approved = tmp_path / "approved"
+    approved.mkdir()
+    candidate = approved / "build.log"
+    candidate.write_text("safe original")
+    outside = tmp_path / "outside.log"
+    outside.write_text("synthetic outside canary")
+    original_open = Path.open
+    def swapped(path, *args, **kwargs):
+        return original_open(outside if path == candidate else path, *args, **kwargs)
+    client = Scorer()
+    monkeypatch.setattr(Path, "open", swapped)
+    with pytest.raises(ValueError, match="outside_approved_workspace"):
+        read_evidence_file(str(candidate), "inspect", [str(approved)], client=client)
+    assert client.calls == []
+
+
+def test_file_evidence_redacts_npm_assignment(tmp_path):
+    path = tmp_path / "build.log"
+    original = "//registry.npmjs.org/:_authToken=npm_synthetic123456789\nBuild failed; exit 1\n"
+    path.write_text(original)
+    client = Scorer()
+    result = read_evidence_file(str(path), "inspect", [str(tmp_path)], client=client)
+    assert "npm_synthetic" not in result["output"]
+    assert "Build failed; exit 1" in result["output"]
+    assert path.read_text() == original
+    assert "npm_synthetic" not in str(client.calls)

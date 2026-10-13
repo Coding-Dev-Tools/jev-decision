@@ -24,6 +24,7 @@ $wheelHash = (Get-FileHash -LiteralPath $wheel[0].FullName -Algorithm SHA256).Ha
 $runtimePath = Join-Path $managedHome ("runtimes\0.3.0-" + $wheelHash.Substring(0, 12))
 $jevPython = Join-Path $runtimePath "Scripts\python.exe"
 $packageManifest = Join-Path $runtimePath "installation.json"
+$installPackage = $false
 if (Test-Path -LiteralPath $runtimePath) {
     if (-not (Test-Path -LiteralPath $packageManifest)) { throw "Existing runtime is incomplete; use a new build directory after inspection" }
     $existing = Get-Content -LiteralPath $packageManifest -Raw | ConvertFrom-Json
@@ -31,12 +32,23 @@ if (Test-Path -LiteralPath $runtimePath) {
 } else {
     & $Python -m venv $runtimePath
     if ($LASTEXITCODE -ne 0) { throw "Runtime creation failed" }
+    $installPackage = $true
+}
+# Resolve an existing executable, not just its directory: MSIX can expose a
+# merged directory view while redirecting the actual files into LocalCache.
+$jevPython = (& $jevPython -I -c "from pathlib import Path; import sys; print(Path(sys.executable).resolve())").Trim()
+if ($LASTEXITCODE -ne 0) { throw "Unable to resolve physical runtime interpreter" }
+$runtimePath = Split-Path -Parent (Split-Path -Parent $jevPython)
+$managedHome = Split-Path -Parent (Split-Path -Parent $runtimePath)
+$packageManifest = Join-Path $runtimePath "installation.json"
+if ($installPackage) {
     & $jevPython -m pip install --no-deps --no-index $wheel[0].FullName
     if ($LASTEXITCODE -ne 0) { throw "Package installation failed" }
     & $jevPython -I -c "import jev_decision; assert jev_decision.__version__ == '0.3.0'"
     if ($LASTEXITCODE -ne 0) { throw "Installed version verification failed" }
-    [IO.File]::WriteAllText((Join-Path $runtimePath "jev-runtime-home.txt"), $managedHome, (New-Object Text.UTF8Encoding($false)))
-    $record = [ordered]@{
+}
+[IO.File]::WriteAllText((Join-Path $runtimePath "jev-runtime-home.txt"), $managedHome, (New-Object Text.UTF8Encoding($false)))
+$record = [ordered]@{
         version = "0.3.0"
         wheel_sha256 = $wheelHash
         python = $jevPython
@@ -44,9 +56,8 @@ if (Test-Path -LiteralPath $runtimePath) {
         cli = (Join-Path $runtimePath "Scripts\jev.exe")
         mcp = (Join-Path $runtimePath "Scripts\jev-mcp.exe")
         installed_utc = [DateTime]::UtcNow.ToString("o")
-    }
-    [IO.File]::WriteAllText($packageManifest, ($record | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
 }
+[IO.File]::WriteAllText($packageManifest, ($record | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))
 $manifest = Get-Content -LiteralPath $packageManifest -Raw | ConvertFrom-Json
 # Keep previous versions for reversible launcher updates. No credential is read.
 $manifest | ConvertTo-Json

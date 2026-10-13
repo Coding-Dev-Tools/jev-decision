@@ -15,11 +15,11 @@ From a reviewed source checkout with Python 3.11 or newer, run PowerShell:
 The script builds a wheel, installs it in a versioned environment under LocalAppData/JevDecision/runtimes, and writes a non-secret installation manifest. It does not replace your normal model or configure harnesses automatically. Use the absolute Python path printed by the script for the commands below:
 
 ```powershell
-& $jevPython -m jev_decision.cli auth set --gui
-& $jevPython -m jev_decision.cli doctor --json
-& $jevPython -m jev_decision.cli harness install --dry-run
-& $jevPython -m jev_decision.cli harness install --apply
-& $jevPython -m jev_decision.cli doctor --live --json
+& $jevPython -I -m jev_decision.cli auth set --gui
+& $jevPython -I -m jev_decision.cli doctor --json
+& $jevPython -I -m jev_decision.cli harness install --dry-run
+& $jevPython -I -m jev_decision.cli harness install --apply
+& $jevPython -I -m jev_decision.cli doctor --live --json
 ```
 
 Enter the key only into the masked local window. Windows CurrentUser DPAPI encrypts the credential, with access restricted to the current user and SYSTEM. Harness entries contain only absolute launcher references. Restart existing Jev MCP processes after credential or runtime configuration changes. A protected file does not prove provider authentication; only a successful live response does.
@@ -35,7 +35,7 @@ Preview restoration with `harness restore`, then apply with `harness restore --a
 - Cache identical successful evaluations within one client session. Failure or budget exhaustion returns control to the normal workflow.
 - Automatic pruning is disabled. Advisory scores alone do not demonstrate improved accuracy, token savings or latency.
 
-The shared non-secret `config.json` supports approved absolute workspace roots, disabling the runtime, lowering the daily cap and enabling pruning only after validation. Environment credentials remain a Python library compatibility path; the managed installation uses protected storage. Independent SDK calls that bypass this runtime do not share its budget.
+The shared non-secret `config.json` supports approved absolute workspace roots, disabling the runtime, lowering the daily cap and enabling pruning only after validation. An installed runtime's home marker takes precedence over inherited `JEV_HOME`, keeping every managed adapter on its installed ledger. Environment credentials remain a Python library compatibility path; the managed installation uses protected storage. Independent SDK calls that bypass this runtime do not share its budget.
 
 ## MCP and CLI interfaces
 
@@ -56,9 +56,9 @@ Run `python -m jev_decision.mcp` for bounded JSON-RPC stdio. Tools:
 {"state":{"log":"FAIL example; exit code 1"},"questions":{"failure":{"type":"noul","instructions":"Does the log report a failure?"}}}
 ```
 
-Choice questions require 2–255 unique descriptive criteria. Score questions require 2–10 descriptive rubric levels. Responses must contain every requested answer with the correct type, resolved model and a valid probability distribution where applicable. Scores preserve fractional values and legends. Noul confidence and absent usage are unknown, not fabricated zeroes.
+Choice questions require 2–255 unique descriptive criteria. Score questions require 2–10 descriptive rubric levels. Responses must contain every requested answer with the correct type, resolved model and a valid probability distribution where applicable. Scores preserve fractional values and legends, including the distinction between JSON booleans and numbers. Noul confidence and absent usage are unknown, not fabricated zeroes. The managed Python client rejects secret-bearing question IDs before spending or transmitting; use plain correlation labels such as `failure`.
 
-File-backed evidence selection rejects traversal outside configured roots, sensitive filenames, binary files and oversized inputs. It sanitizes excerpts, records original hashes and line spans, preserves the original artifact, and retains failure details, test summaries, exit codes and uncertain content. It cannot transparently shorten output a primary model has already read. Do not pass arbitrary private files for external evaluation.
+File-backed evidence selection checks the opened file handle's final path before reading, preventing symlink or junction swaps from escaping configured roots. It rejects sensitive filenames (including `.npmrc`, `.netrc`, `.pypirc` and encrypted credential stores), binary files and oversized inputs. It sanitizes excerpts, records original hashes and line spans, preserves the original artifact, and retains failure details, test summaries, exit codes and uncertain content. It cannot transparently shorten output a primary model has already read. Do not pass arbitrary private files for external evaluation.
 
 ## Harnesses and validation
 

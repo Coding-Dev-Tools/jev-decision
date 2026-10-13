@@ -67,6 +67,33 @@ test("canonical payload, pinned model, fractional score and Noul confidence pari
   assert(!JSON.stringify(client).includes("test-credential"));
 });
 
+test("structured Score legends remain detached from caller and cache mutations", async () => {
+  let calls = 0;
+  const criteria = [{ description: "Absent evidence", rank: 0 }, { description: "Verified evidence", rank: 1 }];
+  const original = structuredClone(criteria);
+  const client = new JevClient({ apiKey: "test-credential", fetchImpl: async (url, init) => {
+    calls++;
+    const sent = JSON.parse(init.body).questions.q.criteria;
+    return jsonResponse({ model: DEFAULT_MODEL, answers: { q: { type: "score", score: 0.75,
+      confidence: 0.5, probabilities: { 0: 0.25, 1: 0.75 },
+      legend: Object.fromEntries(sent.map((value, index) => [String(index), value])) } } });
+  } });
+  const request = () => [{ id: "q", type: "score", prompt: "Rate quality", criteria }];
+  const first = await client.evaluate("evidence", request());
+  assert.equal(first.source, "provider");
+  assert.deepEqual(first.decisions.q.legend, { 0: original[0], 1: original[1] });
+  first.decisions.q.legend[0].description = "changed result";
+  assert.deepEqual(criteria, original);
+  const second = await client.evaluate("evidence", request());
+  assert.equal(second.source, "cache");
+  assert.deepEqual(second.decisions.q.legend, { 0: original[0], 1: original[1] });
+  second.decisions.q.legend[0].rank = 99;
+  const third = await client.evaluate("evidence", request());
+  assert.deepEqual(third.decisions.q.legend, { 0: original[0], 1: original[1] });
+  assert.equal(calls, 1);
+  assert.equal(third.attempts, 0);
+});
+
 test("native mappings and structured descriptive criteria preserve their meaning", () => {
   const input = {
     binary: { type: "noul", instructions: "Assess the evidence", criteria: { true: "Evidence directly supports the task", false: "Evidence does not support the task" } },
@@ -261,7 +288,7 @@ test("one transient retry shares the deadline and returns the final valid respon
   assert.deepEqual(result.usage, { input_tokens: null, output_tokens: null });
 });
 
-for (const [status, code, callsExpected] of [[401, "authentication_error", 1], [403, "authentication_error", 1], [400, "provider_error", 1], [429, "rate_limited", 2], [503, "provider_error", 2]]) {
+for (const [status, code, callsExpected] of [[401, "authentication_error", 1], [403, "authentication_error", 1], [400, "provider_error", 1], [429, "rate_limited", 2], [503, "provider_error", 2], [529, "provider_error", 2]]) {
   test(`HTTP ${status} produces sanitized ${code} with bounded retries`, async () => {
     let calls = 0;
     const client = new JevClient({ apiKey: "test-credential", fetchImpl: async () => { calls++; return new Response("private-provider-body-test-credential", { status }); } });
@@ -422,4 +449,44 @@ test("shared Python/TypeScript provider corpus matches the canonical public cont
   const { fixture, expected, runCorpus } = require("./contract-runner.cjs");
   const results = await runCorpus();
   for (const spec of fixture.cases) assert.deepEqual(results[spec.name], expected(spec), spec.name);
+});
+
+test("observed two-decimal provider scores preserve values within feasible rounding intervals", async () => {
+  const criteria = ["No direct evidence", "Weak partial evidence", "Substantial evidence", "Complete verified evidence"];
+  const input = { quality: { type: "score", instructions: "Rate this evidence", criteria } };
+  for (const [score, values] of [[0.12, [0.91, 0.05, 0.03, 0.01]], [1.89, [0.18, 0.05, 0.46, 0.31]]]) {
+    const probabilities = Object.fromEntries(values.map((p, index) => [String(index), p]));
+    const response = { model: DEFAULT_MODEL, answers: { quality: { type: "score", score, confidence: 0.8, legend: Object.fromEntries(criteria.map((value, index) => [String(index), value])), probabilities } } };
+    const result = await clientFor(response).evaluate("Sanitized evidence excerpt", input);
+    assert.equal(result.status, "ok");
+    assert.equal(result.decisions.quality.score, score);
+    assert.deepEqual(result.decisions.quality.probabilities, probabilities);
+    response.answers.quality.score = score === 0.12 ? 0.1 : 1.86;
+    assertUnavailable(await clientFor(response).evaluate("Sanitized evidence excerpt", input), "invalid_response");
+  }
+});
+
+test("rounding cannot admit impossible total mass, all-zero probabilities, or a lower reported choice", async () => {
+  const data = answer();
+  data.answers.route.probabilities = { inspect: 0.8, ignore: 0.19 };
+  const valid = await clientFor(data).evaluate("state", questions());
+  assert.equal(valid.status, "ok");
+  assert.deepEqual(valid.decisions.route.probabilities, { inspect: 0.8, ignore: 0.19 });
+  data.answers.route.choice = "ignore";
+  assertUnavailable(await clientFor(data).evaluate("state", questions()), "invalid_response");
+  data.answers.route.choice = "inspect";
+  data.answers.route.probabilities = { inspect: 0.8, ignore: 0.18 };
+  assertUnavailable(await clientFor(data).evaluate("state", questions()), "invalid_response");
+  const criteria = Object.fromEntries(Array.from({ length: 201 }, (_, index) => [`option${index}`, `Criterion option ${index}`]));
+  const response = { model: DEFAULT_MODEL, answers: { route: { type: "choice", choice: "option0", confidence: 0, probabilities: Object.fromEntries(Object.keys(criteria).map(key => [key, 0])) } } };
+  assertUnavailable(await clientFor(response).evaluate("state", { route: { type: "choice", instructions: "Choose a criterion", criteria } }), "invalid_response");
+});
+
+test("fine-precision probabilities retain the existing strict weighted tolerance", async () => {
+  const data = answer();
+  data.answers.quality.probabilities = { 0: 0.1001, 1: 0.1001, 2: 0.7998 };
+  data.answers.quality.score = 1.6997;
+  assert.equal((await clientFor(data).evaluate("state", questions())).status, "ok");
+  data.answers.quality.score = 1.69;
+  assertUnavailable(await clientFor(data).evaluate("state", questions()), "invalid_response");
 });
