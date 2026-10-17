@@ -37,6 +37,69 @@ const batch = (decisions, status = "ok") => ({
   request_id: "fixture", error_code: status === "ok" ? null : "missing_key", is_fallback: false,
 });
 
+test("shared question-ID redaction and collision corpus", async () => {
+  await require("./question-id-runner.cjs").runCorpus();
+});
+
+test("canonical memory recipe converts to the TypeScript native map", async () => {
+  const request = require("../../examples/memory-advice.json");
+  const native = Object.fromEntries(request.questions.map(({ id, ...question }) => [id, question]));
+  assert.deepEqual(normalizeQuestions(native), native);
+  assert.deepEqual(Object.keys(native), ["relation", "memory_type", "relevance", "verification_gap"]);
+  let calls = 0;
+  const client = new JevClient({ offlineMode: true, fetchImpl: async () => { calls++; throw new Error("unexpected provider call"); } });
+  const result = await client.evaluate(request.state, native);
+  assert.equal(result.status, "offline");
+  assert.deepEqual(result.decisions, {});
+  assert.equal(calls, 0);
+});
+
+test("wire-ID cache and concurrent aliases retain each caller's original IDs", async () => {
+  let calls = 0;
+  let release;
+  const responseReady = new Promise(resolve => { release = resolve; });
+  const client = new JevClient({ apiKey: "test-credential", fetchImpl: async (_url, init) => {
+    calls++;
+    const ids = Object.keys(JSON.parse(init.body).questions);
+    await responseReady;
+    return jsonResponse({ model: DEFAULT_MODEL, answers: Object.fromEntries(ids.map(id => [id, { type: "noul", noul: 0.75 }])) });
+  } });
+  const question = id => [{ id, type: "noul", prompt: "Assess the evidence" }];
+  const firstQuestions = question("password=first");
+  const firstPending = client.evaluate("Example evidence", firstQuestions);
+  const secondPending = client.evaluate("Example evidence", question("password=second"));
+  firstQuestions[0].id = "caller-mutated-after-send";
+  release();
+  const [first, second] = await Promise.all([firstPending, secondPending]);
+  assert.deepEqual(Object.keys(first.decisions), ["password=first"]);
+  assert.deepEqual(Object.keys(second.decisions), ["password=second"]);
+  assert.equal(second.source, "cache");
+  assert.equal(second.attempts, 0);
+  assert.deepEqual(second.usage, { input_tokens: 0, output_tokens: 0 });
+  first.decisions["password=first"].probability = 0;
+  second.decisions["password=second"].probability = 0;
+  const third = await client.evaluate("Example evidence", question("password=third"));
+  assert.deepEqual(Object.keys(third.decisions), ["password=third"]);
+  assert.equal(third.decisions["password=third"].probability, 0.75);
+  assert.equal(third.source, "cache");
+  assert.equal(calls, 1);
+});
+
+test("original question IDs in provider replies fail validation before remapping", async () => {
+  let calls = 0;
+  const original = "password=fixture";
+  const client = new JevClient({ apiKey: "test-credential", fetchImpl: async () => {
+    calls++;
+    return jsonResponse({ model: DEFAULT_MODEL, answers: { [original]: { type: "noul", noul: 0.75 } } });
+  } });
+  for (let index = 0; index < 2; index++) {
+    const result = await client.evaluate("Example evidence", [{ id: original, type: "noul", prompt: "Assess the evidence" }]);
+    assertUnavailable(result, "invalid_response");
+    assert(!JSON.stringify(result).includes(original));
+  }
+  assert.equal(calls, 2);
+});
+
 test("canonical payload, pinned model, fractional score and Noul confidence parity", async () => {
   let seen;
   const client = new JevClient({ apiKey: "test-credential", fetchImpl: async (url, init) => {
@@ -67,33 +130,6 @@ test("canonical payload, pinned model, fractional score and Noul confidence pari
   assert(!JSON.stringify(client).includes("test-credential"));
 });
 
-test("structured Score legends remain detached from caller and cache mutations", async () => {
-  let calls = 0;
-  const criteria = [{ description: "Absent evidence", rank: 0 }, { description: "Verified evidence", rank: 1 }];
-  const original = structuredClone(criteria);
-  const client = new JevClient({ apiKey: "test-credential", fetchImpl: async (url, init) => {
-    calls++;
-    const sent = JSON.parse(init.body).questions.q.criteria;
-    return jsonResponse({ model: DEFAULT_MODEL, answers: { q: { type: "score", score: 0.75,
-      confidence: 0.5, probabilities: { 0: 0.25, 1: 0.75 },
-      legend: Object.fromEntries(sent.map((value, index) => [String(index), value])) } } });
-  } });
-  const request = () => [{ id: "q", type: "score", prompt: "Rate quality", criteria }];
-  const first = await client.evaluate("evidence", request());
-  assert.equal(first.source, "provider");
-  assert.deepEqual(first.decisions.q.legend, { 0: original[0], 1: original[1] });
-  first.decisions.q.legend[0].description = "changed result";
-  assert.deepEqual(criteria, original);
-  const second = await client.evaluate("evidence", request());
-  assert.equal(second.source, "cache");
-  assert.deepEqual(second.decisions.q.legend, { 0: original[0], 1: original[1] });
-  second.decisions.q.legend[0].rank = 99;
-  const third = await client.evaluate("evidence", request());
-  assert.deepEqual(third.decisions.q.legend, { 0: original[0], 1: original[1] });
-  assert.equal(calls, 1);
-  assert.equal(third.attempts, 0);
-});
-
 test("native mappings and structured descriptive criteria preserve their meaning", () => {
   const input = {
     binary: { type: "noul", instructions: "Assess the evidence", criteria: { true: "Evidence directly supports the task", false: "Evidence does not support the task" } },
@@ -102,6 +138,44 @@ test("native mappings and structured descriptive criteria preserve their meaning
   };
   assert.deepEqual(normalizeQuestions(input), input);
   assert.deepEqual(normalizeQuestions([{ id: "q", type: "score", prompt: "Rate the excerpt", scale: ["Unrelated evidence", "Direct evidence"] }]).q.criteria, ["Unrelated evidence", "Direct evidence"]);
+});
+
+test("official Choice null descriptions are accepted without changing the payload", async () => {
+  const input = { q: { type: "choice", instructions: "Choose a category", criteria: { yes: null, no: null } } };
+  assert.deepEqual(normalizeQuestions(input), input);
+  const client = new JevClient({ apiKey: "test-credential", fetchImpl: async (_url, init) => {
+    assert.deepEqual(JSON.parse(init.body).questions, input);
+    return jsonResponse({ model: DEFAULT_MODEL, answers: { q: { type: "choice", choice: "yes", confidence: 0.8, probabilities: { yes: 0.9, no: 0.1 } } } });
+  } });
+  assert.equal((await client.evaluate("An excerpt", input)).status, "ok");
+});
+
+for (const hint of ["60", "Mon, 28 Sep 2099 12:00:00 GMT"]) {
+  test(`Retry-After beyond the remaining deadline prevents retry (${hint})`, async () => {
+    let calls = 0;
+    const client = new JevClient({ apiKey: "test-credential", timeoutMs: 200, fetchImpl: async () => {
+      calls++;
+      return new Response("", { status: 429, headers: { "retry-after": hint } });
+    } });
+    const result = await client.evaluate("An excerpt", questions());
+    assertUnavailable(result, "rate_limited");
+    assert.equal(calls, 1);
+    assert.equal(result.attempts, 1);
+  });
+}
+
+test("Retry-After within the deadline is a minimum delay and 529 retries at most once", async () => {
+  let calls = 0;
+  const client = new JevClient({ apiKey: "test-credential", timeoutMs: 1000, fetchImpl: async () => {
+    calls++;
+    return calls === 1 ? new Response("", { status: 529, headers: { "retry-after": "0.12" } }) : jsonResponse(answer());
+  } });
+  const started = performance.now();
+  const result = await client.evaluate("An excerpt", questions());
+  assert.equal(result.status, "ok");
+  assert.equal(calls, 2);
+  assert(performance.now() - started >= 110);
+  assert.equal(result.usage.input_tokens, null);
 });
 
 test("no implicit environment credential, silent fallback, or favorable offline decisions", async () => {
@@ -134,6 +208,9 @@ test("only the exact official origin and path are accepted", () => {
   ]) assert.throws(() => new JevClient({ baseUrl: endpoint }), /Only the official/);
   assert.throws(() => new JevClient({ timeoutMs: 5001 }), /between 1 and 5000/);
   assert.throws(() => new JevClient({ apiKey: "secret\nHeader: injection" }), error => !error.message.includes("secret"));
+  for (const placeholder of ["${TYPESAFE_API_KEY}", "${TYPESAFE_API_KEY:-}", "${env:TYPESAFE_API_KEY}", "{env:TYPESAFE_API_KEY}", "$TYPESAFE_API_KEY", "%TYPESAFE_API_KEY%"]) {
+    assert.throws(() => new JevClient({ apiKey: placeholder }), TypeError);
+  }
 });
 
 const badRequests = [
@@ -288,7 +365,7 @@ test("one transient retry shares the deadline and returns the final valid respon
   assert.deepEqual(result.usage, { input_tokens: null, output_tokens: null });
 });
 
-for (const [status, code, callsExpected] of [[401, "authentication_error", 1], [403, "authentication_error", 1], [400, "provider_error", 1], [429, "rate_limited", 2], [503, "provider_error", 2], [529, "provider_error", 2]]) {
+for (const [status, code, callsExpected] of [[401, "authentication_error", 1], [403, "authentication_error", 1], [400, "provider_error", 1], [408, "timeout", 2], [429, "rate_limited", 2], [503, "provider_error", 2], [529, "provider_error", 2]]) {
   test(`HTTP ${status} produces sanitized ${code} with bounded retries`, async () => {
     let calls = 0;
     const client = new JevClient({ apiKey: "test-credential", fetchImpl: async () => { calls++; return new Response("private-provider-body-test-credential", { status }); } });
@@ -299,6 +376,20 @@ for (const [status, code, callsExpected] of [[401, "authentication_error", 1], [
     assert(!JSON.stringify(result).includes("test-credential"));
   });
 }
+
+test("input usage overruns retain known usage without exposing or caching answers", async () => {
+  const response = answer();
+  response.usage.input_tokens = 70_000;
+  let calls = 0;
+  const client = new JevClient({ apiKey: "test-credential", fetchImpl: async () => { calls++; return jsonResponse(response); } });
+  for (let i = 0; i < 2; i++) {
+    const result = await client.evaluate("state", questions());
+    assertUnavailable(result, "invalid_response");
+    assert.deepEqual(result.usage, response.usage);
+    assert.equal(result.attempts, 1);
+  }
+  assert.equal(calls, 2);
+});
 
 test("transport exceptions never expose their message and retry at most once", async () => {
   let calls = 0;
@@ -489,4 +580,107 @@ test("fine-precision probabilities retain the existing strict weighted tolerance
   assert.equal((await clientFor(data).evaluate("state", questions())).status, "ok");
   data.answers.quality.score = 1.69;
   assertUnavailable(await clientFor(data).evaluate("state", questions()), "invalid_response");
+});
+
+test("every caller-supplied string is redacted on the wire, not only question IDs", async () => {
+  const key = "SUPERSECRETKEY123";
+  const bodies = [];
+  const client = new JevClient({ apiKey: key, cacheEnabled: false, fetchImpl: async (_url, init) => {
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    const [first, second] = Object.keys(body.questions.q1.criteria);
+    return jsonResponse({
+      model: DEFAULT_MODEL,
+      answers: { q1: { type: "choice", choice: first, confidence: 0.9, probabilities: { [first]: 0.9, [second]: 0.1 } } },
+    });
+  } });
+  const result = await client.evaluate(
+    `Build log. My key is ${key}. password=hunter2. DSN postgres://u:pw@h/d.`,
+    { q1: { type: "choice", instructions: `Assess with ${key}`, criteria: { keep: "keep it", escalate: "escalate it" } } },
+  );
+  const wire = JSON.stringify(bodies[0]);
+  assert.ok(!wire.includes(key), "API key reached the wire");
+  assert.ok(!wire.includes("hunter2"), "password assignment reached the wire");
+  assert.ok(!wire.includes("postgres://u:pw@h"), "DSN credentials reached the wire");
+  // The caller still receives its own, unredacted labels.
+  assert.equal(result.decisions.q1.selected, "keep");
+});
+
+test("choice labels that collide only after redaction are rejected before transmission", async () => {
+  let calls = 0;
+  const client = new JevClient({ apiKey: "test-credential", cacheEnabled: false, fetchImpl: async () => {
+    calls += 1;
+    return jsonResponse(answer());
+  } });
+  assertUnavailable(await client.evaluate("state", {
+    q: { type: "choice", instructions: "Choose", criteria: { "password=alpha": null, "password=beta": null } },
+  }), "invalid_request");
+  assert.equal(calls, 0);
+});
+
+test("object keys are redacted on the wire and the caller still gets its originals", async () => {
+  const bodies = [];
+  const client = new JevClient({ apiKey: "SUPERSECRETKEY123", cacheEnabled: false, fetchImpl: async (_url, init) => {
+    const body = JSON.parse(init.body);
+    bodies.push(body);
+    const [first, second] = Object.keys(body.questions.q1.criteria);
+    return jsonResponse({ model: DEFAULT_MODEL, answers: { q1: {
+      type: "choice", choice: first, confidence: 0.9, probabilities: { [first]: 0.9, [second]: 0.1 } } } });
+  } });
+  const label = "dsn=postgres://admin:sup3rSecret@db/prod";
+  const result = await client.evaluate("state", { q1: { type: "choice", instructions: "P",
+    criteria: { [label]: "a", "safe=yes": "b" } } });
+  assert.ok(!JSON.stringify(bodies[0]).includes("sup3rSecret"), "credential in an object key reached the wire");
+  assert.equal(result.decisions.q1.selected, label);
+  assert.deepEqual(Object.keys(result.decisions.q1.probabilities), [label, "safe=yes"]);
+});
+
+test("accessors in state are rejected rather than invoked", async () => {
+  let invoked = false;
+  const state = {};
+  Object.defineProperty(state, "leak", { get() { invoked = true; return "pw=hunter2"; }, enumerable: true });
+  const client = new JevClient({ apiKey: "test-credential", cacheEnabled: false,
+    fetchImpl: async () => { throw new Error("must not be called"); } });
+  assertUnavailable(await client.evaluate(state, { q: { type: "noul", instructions: "y" } }), "invalid_request");
+  assert.equal(invoked, false);
+});
+
+test("a short key does not reject ordinary prose", async () => {
+  const client = new JevClient({ apiKey: "a", cacheEnabled: false, fetchImpl: async () =>
+    jsonResponse({ model: DEFAULT_MODEL, answers: { q: { type: "noul", noul: 0.5 } } }) });
+  const result = await client.evaluate("a normal sentence", { q: { type: "noul", instructions: "y" } });
+  assert.equal(result.status, "ok");
+});
+
+test("placeholder literals are refused exactly as in Python", () => {
+  for (const apiKey of ["changeme", "change-me", "none", "null", "sample", "xxx",
+                        "test-key", "dummy", "todo", "tbd", "-", "--", "...", "placeholder"]) {
+    assert.throws(() => new JevClient({ apiKey }), TypeError, `accepted ${apiKey}`);
+  }
+});
+
+test("error precedence reports the client state before validating the payload", async () => {
+  const malformed = { q: { type: "not-a-type" } };
+  const offline = await new JevClient({ offlineMode: true, apiKey: "test-credential" }).evaluate("state", malformed);
+  assert.equal(offline.status, "offline");
+  assert.equal(offline.error_code, "offline");
+  assertUnavailable(await new JevClient().evaluate("state", malformed), "missing_key");
+});
+
+test("reserved demo credentials are refused rather than sent to the provider", () => {
+  for (const apiKey of ["mock", "MOCK", "offline"]) {
+    assert.throws(() => new JevClient({ apiKey }), TypeError);
+  }
+});
+
+test("every result reports advisory_only", async () => {
+  const ok = await clientFor(answer()).evaluate("state", questions());
+  assert.equal(ok.advisory_only, true);
+  const missing = await new JevClient().evaluate("state", questions());
+  assert.equal(missing.advisory_only, true);
+});
+
+test("requested_model echoes the caller's requested model", async () => {
+  const result = await clientFor(answer()).evaluate("state", questions(), DEFAULT_MODEL);
+  assert.equal(result.requested_model, DEFAULT_MODEL);
 });

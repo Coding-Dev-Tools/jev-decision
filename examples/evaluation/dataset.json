@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "label_method": "deterministic",
+  "cases": [
+    {
+      "task_id": "case-1",
+      "group_id": "fixture-project-1",
+      "split": "development",
+      "source_class": "test_log",
+      "source": "case-1.log",
+      "source_sha256": "50e418e9c8df8979e3395849ff387de4104a883936853e531d3464625303c39a",
+      "goal": "Identify the failure and producer exit status.",
+      "critical_facts": [
+        "ERROR task case-1: expected 4, observed 5",
+        "1 failed, 12 passed",
+        "exit status 1"
+      ],
+      "expected_answer": {
+        "failed": 1,
+        "passed": 12,
+        "exit_status": 1
+      }
+    },
+    {
+      "task_id": "case-2",
+      "group_id": "fixture-project-2",
+      "split": "development",
+      "source_class": "test_log",
+      "source": "case-2.log",
+      "source_sha256": "633c97618979391f57f55b86976e099d2ccc165f05e889fcb0f9e5118dd2a419",
+      "goal": "Identify the failure and producer exit status.",
+      "critical_facts": [
+        "ERROR task case-2: expected 4, observed 5",
+        "1 failed, 12 passed",
+        "exit status 1"
+      ],
+      "expected_answer": {
+        "failed": 1,
+        "passed": 12,
+        "exit_status": 1
+      }
+    },
+    {
+      "task_id": "case-3",
+      "group_id": "fixture-project-3",
+      "split": "held_out",
+      "source_class": "test_log",
+      "source": "case-3.log",
+      "source_sha256": "a2021cc47fbe5c847940ca8df213adf2be67bb5d4a590d4c43172c17b8cbdda3",
+      "goal": "Identify the failure and producer exit status.",
+      "critical_facts": [
+        "ERROR task case-3: expected 4, observed 5",
+        "1 failed, 12 passed",
+        "exit status 1"
+      ],
+      "expected_answer": {
+        "failed": 1,
+        "passed": 12,
+        "exit_status": 1
+      }
+    },
+    {
+      "task_id": "case-4",
+      "group_id": "fixture-project-4",
+      "split": "held_out",
+      "source_class": "test_log",
+      "source": "case-4.log",
+      "source_sha256": "260565787436a1b3519563ac7829a837c234cff492a29b9f30af83e5d9beb2d8",
+      "goal": "Identify the failure and producer exit status.",
+      "critical_facts": [
+        "ERROR task case-4: expected 4, observed 5",
+        "1 failed, 12 passed",
+        "exit status 1"
+      ],
+      "expected_answer": {
+        "failed": 1,
+        "passed": 12,
+        "exit_status": 1
+      }
+    }
+  ]
+}

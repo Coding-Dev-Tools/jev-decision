@@ -6,6 +6,7 @@
   "types": "dist/index.d.ts",
   "scripts": {
     "build": "tsc",
+    "check:package": "node scripts/check_package.cjs",
     "test": "npm run build && node --test test/client.test.cjs"
   },
   "keywords": [
@@ -17,9 +18,12 @@
     "mcp"
   ],
   "author": "Coding-Dev-Tools",
+  "repository": { "type": "git", "url": "https://github.com/Coding-Dev-Tools/jev-decision.git", "directory": "ts" },
+  "homepage": "https://github.com/Coding-Dev-Tools/jev-decision/tree/main/ts#readme",
+  "bugs": { "url": "https://github.com/Coding-Dev-Tools/jev-decision/issues" },
   "license": "MIT",
   "engines": { "node": ">=20" },
-  "files": ["dist/index.js", "dist/index.d.ts", "README.md"],
+  "files": ["dist/index.js", "dist/index.d.ts", "README.md", "LICENSE"],
   "devDependencies": {
     "typescript": "^5.4.0",
     "@types/node": "^20.0.0"

@@ -6,7 +6,7 @@ import json
 import pytest
 
 from jev_decision.client import normalize_questions
-from jev_decision.mcp import MCPServer, TOOLS_MANIFEST
+from jev_decision.mcp import TOOLS_MANIFEST, InvalidParams, MCPServer
 from jev_decision.primitives import DecisionBatch
 
 
@@ -35,7 +35,12 @@ def _call(server, arguments):
         "jsonrpc": "2.0", "id": "schema-call", "method": "tools/call",
         "params": {"name": "jev_decide", "arguments": arguments},
     }))
-    return server.handle_request(request)
+    try:
+        body = server.call_tool('jev_decide', request['params']['arguments'])
+        return {'result': {'content': [{'text': json.dumps(body)}]}}
+    except InvalidParams:
+        return {'id': 'schema-call', 'error': {'code': -32602}}
+
 
 
 def test_advertised_examples_reach_client_as_all_three_native_question_types():
@@ -103,10 +108,26 @@ def test_published_schema_rejects_common_model_shape_errors(replacement):
     assert not jsonschema.Draft202012Validator(_schema()).is_valid(arguments)
 
 
-def test_published_state_requires_a_nonempty_object():
+def test_published_state_requires_nonempty_supported_json():
     jsonschema = pytest.importorskip("jsonschema")
     validator = jsonschema.Draft202012Validator(_schema())
-    for value in ("an encoded object", [], {}, None):
+    for value in ("", [], {}, None):
         arguments = _examples()
         arguments["state"] = value
         assert not validator.is_valid(arguments)
+
+
+@pytest.mark.parametrize("question", [
+    {"id": " ", "type": "noul", "instructions": "Question?"},
+    {"id": "q", "type": "noul", "instructions": " "},
+    {"id": "q", "type": "choice", "instructions": "Question?", "criteria": {" ": "A", "b": "B"}},
+    {"id": "q", "type": "choice", "instructions": "Question?", "criteria": {"a": " ", "b": "B"}},
+    {"id": "q", "type": "score", "instructions": "Question?", "criteria": ["Same", "Same"]},
+])
+def test_compact_discovery_and_backend_reject_the_same_invalid_content(question):
+    jsonschema = pytest.importorskip("jsonschema")
+    arguments = {"state": "sample", "questions": [question]}
+    assert not jsonschema.Draft202012Validator(_schema()).is_valid(arguments)
+    client = RecordingClient()
+    assert _call(MCPServer(client), arguments)["error"]["code"] == -32602
+    assert client.calls == []

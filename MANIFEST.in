@@ -1,0 +1,9 @@
+include LICENSE README.md
+recursive-include docs *.md *.json
+recursive-include examples *.py *.ps1 *.sh *.json *.log
+recursive-include scripts *.py *.ps1
+recursive-include tests *.py
+include ts/package.json ts/package-lock.json ts/tsconfig.json ts/README.md ts/LICENSE
+recursive-include ts/src *.ts
+recursive-include ts/test *.cjs *.json
+recursive-include ts/scripts *.cjs

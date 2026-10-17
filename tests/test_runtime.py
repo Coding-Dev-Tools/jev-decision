@@ -5,8 +5,8 @@ import os
 import sqlite3
 import subprocess
 import sys
-import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
@@ -30,36 +30,16 @@ def isolated_runtime(tmp_path, monkeypatch):
 def test_defaults_do_not_create_state(isolated_runtime):
     config = isolated_runtime
     assert not config.home.exists()
-    assert config.enabled is True
+    assert config.enabled is False
+    assert config.setup_complete is False
+    assert config.timezone == "UTC"
+    assert config.selection_mode == "off"
     assert config.pruning_enabled is False
     assert config.model == "jev-1.13.0"
     assert config.daily_budget_usd == Decimal("1.00")
     assert config.max_request_bytes == 24576
     assert config.max_response_bytes == 262144
     assert config.workspace_roots == ()
-
-
-def test_installed_home_marker_overrides_inherited_home(tmp_path, monkeypatch):
-    installed = tmp_path / "installed"
-    installed.mkdir()
-    shared = tmp_path / "shared"
-    (installed / "jev-runtime-home.txt").write_text(str(shared), encoding="utf-8")
-    monkeypatch.setattr(sys, "prefix", str(installed))
-    monkeypatch.setenv("JEV_HOME", str(tmp_path / "separate"))
-    config = RuntimeConfig.load()
-    assert config.home == shared
-    assert config.ledger_path == shared / "budget.sqlite3"
-    assert not shared.exists()
-
-
-def test_invalid_installed_marker_never_falls_back_to_environment(tmp_path, monkeypatch):
-    installed = tmp_path / "installed"
-    installed.mkdir()
-    (installed / "jev-runtime-home.txt").write_text("relative-home", encoding="utf-8")
-    monkeypatch.setattr(sys, "prefix", str(installed))
-    monkeypatch.setenv("JEV_HOME", str(tmp_path / "separate"))
-    with pytest.raises(RuntimeConfigError):
-        RuntimeConfig.load()
 
 
 def test_public_config_atomic_roundtrip(isolated_runtime, tmp_path):
@@ -70,14 +50,20 @@ def test_public_config_atomic_roundtrip(isolated_runtime, tmp_path):
     document = json.loads(config.config_path.read_text())
     assert "api_key" not in document
     assert document["workspace_roots"] == [str(tmp_path.resolve())]
-    assert "credential" not in json.dumps(config.public_status()).lower()
+    assert document["version"] == 2
+    assert config.public_status()["credential_source"] == "auto"
 
 
 @pytest.mark.parametrize("changes", [
     {"endpoint": "https://api.typesafe.ai.evil.example/v1/systemone"},
-    {"model": "jev-latest"}, {"daily_budget_usd": "1.01"}, {"daily_budget_usd": "NaN"},
+    {"model": "jev-latest"}, {"daily_budget_usd": "-1"}, {"daily_budget_usd": "NaN"},
     {"daily_budget_usd": "0.0000000001"}, {"workspace_roots": ["relative"]},
-    {"enabled": "false"}, {"pruning_enabled": 1}, {"timezone": "UTC"},
+    {"enabled": "false"}, {"pruning_enabled": 1}, {"timezone": "Missing/Timezone"},
+    {"credential_source": "plaintext"}, {"key_env": "KEY=secret"}, {"setup_complete": 1},
+    {"key_env": "JEV_HOME"}, {"key_env": "jev_home"},
+    {"key_env": "JEV_ENDPOINT_URL"}, {"key_env": "JEV_OFFLINE_MODE"},
+    {"key_env": "JEV_HOOK"}, {"key_env": "jev_hook_threshold"},
+    {"selection_mode": "select"}, {"selection_mode": "anything"}, {"qualified_profile_path": "relative"},
     {"max_request_bytes": 24577}, {"max_response_bytes": 262145}, {"timeout_s": float("nan")},
 ])
 def test_invalid_public_configuration_rejected(isolated_runtime, changes):
@@ -91,6 +77,110 @@ def test_credential_fields_cannot_enter_config(isolated_runtime):
     with pytest.raises(RuntimeConfigError) as result:
         RuntimeConfig.load()
     assert "synthetic" not in str(result.value)
+
+
+def test_user_budget_has_no_one_dollar_ceiling_and_zero_disables(tmp_path):
+    assert RuntimeConfig(home=tmp_path, daily_budget_usd="12.50").daily_budget_usd == Decimal("12.50")
+    assert RuntimeConfig(home=tmp_path, daily_budget_usd=0).enabled is False
+    assert RuntimeConfig(home=tmp_path).enabled is True
+
+
+def test_incomplete_v2_config_does_not_implicitly_enable_provider(isolated_runtime):
+    isolated_runtime.home.mkdir()
+    isolated_runtime.config_path.write_text('{"version":2}')
+    current = RuntimeConfig.load()
+    assert current.enabled is False and current.setup_complete is False
+    assert current.timezone == "UTC"
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_v1_migration_preserves_state_and_disables_unqualified_selection(isolated_runtime, enabled):
+    config = isolated_runtime
+    config.home.mkdir()
+    original = {"version": 1, "enabled": enabled, "pruning_enabled": True,
+                "workspace_roots": [str(config.home.parent)]}
+    config.config_path.write_text(json.dumps(original))
+    config.ledger_path.write_bytes(b"existing-ledger-marker")
+    config.credential_path.write_bytes(b"existing-credential-marker")
+    migrated = RuntimeConfig.load()
+    assert migrated.enabled is enabled and migrated.setup_complete
+    assert migrated.timezone == "America/New_York"
+    assert migrated.daily_budget_usd == Decimal("1.00")
+    assert migrated.workspace_roots == (config.home.parent,)
+    assert migrated.selection_mode == "off" and migrated.pruning_enabled is False
+    assert json.loads(config.config_path.read_text()) == original  # load is read-only
+    migrated.save()
+    assert RuntimeConfig.load() == migrated
+    assert config.ledger_path.read_bytes() == b"existing-ledger-marker"
+    assert config.credential_path.read_bytes() == b"existing-credential-marker"
+
+
+def test_legacy_pruning_flag_cannot_enable_selection(tmp_path):
+    assert RuntimeConfig(home=tmp_path, pruning_enabled=True).selection_mode == "off"
+    assert not RuntimeConfig(home=tmp_path, pruning_enabled=True).pruning_enabled
+    selected = RuntimeConfig(home=tmp_path, selection_mode="select", qualified_profile_path=tmp_path / "profile.json")
+    assert selected.pruning_enabled is True
+
+
+def test_selected_environment_source_ignores_other_stores(isolated_runtime, monkeypatch):
+    config = replace(isolated_runtime, credential_source="env", key_env="TEST_JEV_SECRET")
+    config.home.mkdir()
+    config.credential_path.write_bytes(b"not-a-key")
+    monkeypatch.setenv("TYPESAFE_API_KEY", "unselected-key")
+    monkeypatch.setenv("TEST_JEV_SECRET", "synthetic-selected-key")
+    assert credentials.load_api_key(config) == "synthetic-selected-key"
+    assert credentials.load_api_key(config, allow_environment=False) is None
+    with pytest.raises(CredentialError, match="environment variable"):
+        credentials.save_api_key("do-not-write", config)
+    assert config.credential_path.read_bytes() == b"not-a-key"
+
+
+def _fake_keyring(monkeypatch, module="keyring.backends.SecretService", name="Keyring", platform="linux"):
+    import types
+    values = {}
+    backend_type = type(name, (), {"__module__": module, "priority": 5,
+        "set_password": lambda self, service, account, value: values.__setitem__((service, account), value),
+        "get_password": lambda self, service, account: values.get((service, account))})
+    backend = backend_type()
+    monkeypatch.setitem(sys.modules, "keyring", types.SimpleNamespace(get_keyring=lambda: backend))
+    monkeypatch.setattr(credentials.sys, "platform", platform)
+    return values
+
+
+@pytest.mark.parametrize("module,name,platform", [
+    ("keyring.backends.SecretService", "Keyring", "linux"),
+    ("keyring.backends.kwallet", "DBusKeyring", "linux"),
+    ("keyring.backends.macOS", "Keyring", "darwin"),
+    ("keyring.backends.Windows", "WinVaultKeyring", "win32"),
+])
+def test_approved_os_keyrings_roundtrip_without_plaintext_files(isolated_runtime, monkeypatch, module, name, platform):
+    values = _fake_keyring(monkeypatch, module, name, platform)
+    config = replace(isolated_runtime, credential_source="keyring")
+    credentials.save_api_key("synthetic-vault-key", config)
+    assert credentials.load_api_key(config) == "synthetic-vault-key"
+    assert len(values) == 1 and not config.home.exists()
+    assert credentials.load_api_key(replace(config, home=config.home / "other")) is None
+
+
+@pytest.mark.parametrize("module,name", [
+    ("keyrings.alt.file", "PlaintextKeyring"), ("keyring.backends.null", "Keyring"),
+    ("custom.remote", "Keyring"), ("keyring.backends.macOS", "Keyring"),
+])
+def test_unapproved_keyrings_are_never_read_or_written(isolated_runtime, monkeypatch, module, name):
+    values = _fake_keyring(monkeypatch, module, name)
+    config = replace(isolated_runtime, credential_source="keyring")
+    with pytest.raises(CredentialError, match="supported OS credential backend"):
+        credentials.save_api_key("synthetic-key", config)
+    with pytest.raises(CredentialError):
+        credentials.load_api_key(config)
+    assert values == {} and not config.home.exists()
+
+
+def test_keyring_status_does_not_unlock_the_store(isolated_runtime, monkeypatch):
+    monkeypatch.setattr(credentials, "_os_keyring", lambda: pytest.fail("status attempted to access the vault"))
+    status = credentials.credential_status(replace(isolated_runtime, credential_source="keyring"))
+    assert status["credential_present"] is None and status["presence_status"] == "not_checked"
+    assert status["authentication_verified"] is False
 
 
 def test_environment_key_is_explicit_compatibility(isolated_runtime, monkeypatch):
@@ -223,10 +313,12 @@ def test_independent_processes_share_one_cap(isolated_runtime):
     config.save()
     ledger = BudgetLedger(config)
     source = """from jev_decision.budget import BudgetLedger, BudgetError
-ledger = BudgetLedger()
+ledger = None
 accepted = 0
 for _ in range(16):
     try:
+        if ledger is None:
+            ledger = BudgetLedger()
         ledger.reserve()
         accepted += 1
     except BudgetError:
@@ -246,18 +338,37 @@ print(accepted)
     assert ledger.status()["committed_usd"] == 0.02688
 
 
-def test_busy_ledger_fails_closed_quickly(isolated_runtime):
+def test_busy_ledger_fails_closed_with_bounded_sqlite_wait(isolated_runtime, monkeypatch):
     ledger = BudgetLedger(isolated_runtime)
+    connect = ledger._connect
+    busy_waits = []
+
+    def observe_connection(deadline=None):
+        opened = connect(deadline)
+        busy_waits.append(opened.execute("PRAGMA busy_timeout").fetchone()[0])
+        return opened
+
+    monkeypatch.setattr(ledger, "_connect", observe_connection)
     connection = sqlite3.connect(str(isolated_runtime.ledger_path), isolation_level=None)
     try:
         connection.execute("BEGIN IMMEDIATE")
-        started = time.monotonic()
         with pytest.raises(BudgetError):
             ledger.reserve()
-        assert time.monotonic() - started < 1.0
     finally:
         connection.close()
+    # A busy timeout bounds SQLite lock retries, not connection/filesystem work
+    # or scheduler delays. Absolute accounting/client deadlines are tested separately.
+    assert busy_waits and all(0 < milliseconds <= 200 for milliseconds in busy_waits)
     assert ledger.status()["attempts"] == 0
+
+
+def test_package_registry_and_typesafe_redaction():
+    text = '//registry.npmjs.org/:_authToken=npm_synthetic123456789\n' \
+        '_auth=opaque-registry-canary\napikey_synthetic1234567890123456'
+    clean = policy.sanitize(text)
+    assert "synthetic" not in clean and "opaque-registry-canary" not in clean
+    clean_state = policy.sanitize_state({"_authToken": "opaque-value", "_auth": "opaque-value"})
+    assert "opaque-value" not in json.dumps(clean_state)
 
 
 def test_invalid_and_conflicting_usage_remains_conservative(isolated_runtime):
@@ -281,7 +392,7 @@ def test_provider_usage_above_reservation_is_not_hidden(isolated_runtime):
 
 def test_midnight_rollover_keeps_old_attempt_on_original_day(isolated_runtime):
     now = [datetime(2026, 9, 28, 3, 59, 59, tzinfo=timezone.utc)]
-    ledger = BudgetLedger(isolated_runtime, clock=lambda: now[0])
+    ledger = BudgetLedger(replace(isolated_runtime, timezone="America/New_York"), clock=lambda: now[0])
     old = ledger.reserve()
     assert old.day == "2026-09-27"
     now[0] = datetime(2026, 9, 28, 4, 0, 0, tzinfo=timezone.utc)
@@ -301,8 +412,8 @@ def test_midnight_rollover_keeps_old_attempt_on_original_day(isolated_runtime):
     ("2026-11-02T05:00:00+00:00", "2026-11-02", "2026-11-03T05:00:00+00:00"),
 ])
 def test_new_york_dst_without_system_tzdata(isolated_runtime, monkeypatch, instant, day, reset):
-    monkeypatch.setattr(budget, "_zone", lambda: None)
-    ledger = BudgetLedger(isolated_runtime, clock=lambda: datetime.fromisoformat(instant))
+    monkeypatch.setattr(budget, "_zone", lambda *args: None)
+    ledger = BudgetLedger(replace(isolated_runtime, timezone="America/New_York"), clock=lambda: datetime.fromisoformat(instant))
     status = ledger.status()
     assert status["day"] == day
     assert status["resets_at"] == reset
@@ -350,13 +461,48 @@ def test_excerpt_redacts_recognizable_credentials():
     assert '"ok": true' in clean
 
 
-def test_package_registry_and_typesafe_redaction():
-    text = '//registry.npmjs.org/:_authToken=npm_synthetic123456789\n' \
-        '_auth=opaque-registry-canary\napikey_synthetic1234567890123456'
+@pytest.mark.parametrize("text,secret", [
+    ("postgres://app:hunter2@db.internal:5432/prod", "hunter2"),
+    ("mongodb+srv://user:pass@cluster.example/db", "pass"),
+    ("redis://:redispw@cache.internal:6379/0", "redispw"),
+    ("amqp://guest:guest@broker:5672/", "guest:guest"),
+    ('{"dsn": "postgres://u:p@h/db"}', "postgres://u:p@h/db"),
+])
+def test_uri_userinfo_credentials_are_redacted_for_any_scheme(text, secret):
+    """A database DSN discloses a credential exactly like an https URL does."""
     clean = policy.sanitize(text)
-    assert "synthetic" not in clean and "opaque-registry-canary" not in clean
-    clean_state = policy.sanitize_state({"_authToken": "opaque-value", "_auth": "opaque-value"})
-    assert "opaque-value" not in json.dumps(clean_state)
+    assert secret not in clean
+    assert "[REDACTED]" in clean
+
+
+@pytest.mark.parametrize("text,secret", [
+    ("aws_access_key_id=AKIAIOSFODNN7EXAMPLE", "AKIAIOSFODNN7EXAMPLE"),
+    ("passphrase: correct-horse-battery", "correct-horse-battery"),
+    ('signing_key = abcdef1234567890abcdef', "abcdef1234567890abcdef"),
+    ("session_token = abcdef0123456789", "abcdef0123456789"),
+])
+def test_additional_credential_assignments_are_redacted(text, secret):
+    assert secret not in policy.sanitize(text)
+
+
+@pytest.mark.parametrize("text", [
+    "dsn: unknown",
+    "credentials: pending",
+    '{"credentials": "rotated", "region": "us-east-1"}',
+    "The dsn: value is redacted, which is wrong",
+    "note: 12:30@here",
+    "see also 2:1@3",
+    "see https://example.com/docs for details",
+    "user@example.com wrote this",
+    "http://localhost:8080/health",
+    "http://[::1]:8080/path",
+    "registry.io:5000/img@sha256:abcdef",
+    "C:\\Users\\bob\\Documents\\a@b",
+    "the DSN is documented in the runbook",
+])
+def test_ordinary_state_is_not_mangled_by_credential_screening(text):
+    """Only real credential shapes are rewritten; user data is left intact."""
+    assert policy.sanitize(text) == text
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), {1: "bad"}, {"bad": object()}])

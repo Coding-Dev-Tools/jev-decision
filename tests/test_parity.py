@@ -8,9 +8,21 @@ from pathlib import Path
 import pytest
 
 from jev_decision.client import JevClient
+from jev_decision.runtime import RuntimeConfig
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = json.loads((ROOT / "ts/test/fixtures/contract.json").read_text(encoding="utf-8"))
+
+
+class FixtureLedger:
+    # This corpus compares provider contracts, including exact error codes.
+    # A slow disk may legitimately produce a deadline error instead; real SQLite
+    # and deadline behavior are covered by the runtime/accounting test suites.
+    def reserve(self):
+        return object()
+
+    def settle(self, reservation, token_count=None):
+        pass
 
 
 def materialize(spec):
@@ -29,14 +41,18 @@ def materialize(spec):
 
 def normalized_result(spec):
     body = materialize(spec)
-    questions = copy.deepcopy(FIXTURE["questions"])
-    for patch in spec.get("question_patches", []):
-        target = questions
-        for key in patch["path"][:-1]:
-            target = target[key]
-        target[patch["path"][-1]] = copy.deepcopy(patch["value"])
-    client = JevClient(api_key="fixture-only-not-a-real-key", transport=lambda *args: (200, body))
-    result = client.evaluate(FIXTURE["state"], questions).to_dict()
+    statuses = spec.get("http_statuses", [200])
+    calls = 0
+
+    def transport(*args):
+        nonlocal calls
+        status = statuses[min(calls, len(statuses) - 1)]
+        calls += 1
+        return status, body
+
+    client = JevClient(api_key="fixture-only-not-a-real-key", runtime=RuntimeConfig(enabled=True),
+                       transport=transport, budget_ledger=FixtureLedger())
+    result = client.evaluate(FIXTURE["state"], spec.get("questions", FIXTURE["questions"])).to_dict()
     result.pop("latency_ms")
     result.pop("request_id")
     return result

@@ -5,6 +5,7 @@ import json
 import threading
 import time
 import urllib.request
+from decimal import Decimal
 
 import pytest
 
@@ -15,8 +16,20 @@ from jev_decision import (
     ScoreQuestion,
     normalize_questions,
 )
-from jev_decision.budget import BudgetError, BudgetExceeded
-from jev_decision.client import DEFAULT_MODEL, DEFAULT_TYPESAFE_ENDPOINT, _http_transport
+from jev_decision.budget import (
+    MAX_SETTLEMENT_TOKENS,
+    NANODOLLARS_PER_DOLLAR,
+    NANODOLLARS_PER_TOKEN,
+    BudgetError,
+    BudgetExceeded,
+    BudgetLedger,
+)
+from jev_decision.client import (
+    DEFAULT_MODEL,
+    DEFAULT_TYPESAFE_ENDPOINT,
+    MAX_SAFE_USAGE_INTEGER,
+    _http_transport,
+)
 from jev_decision.runtime import RuntimeConfig
 
 KEY = "fixture-only-key-no-provider-access"
@@ -76,7 +89,7 @@ def clear_ambient_configuration(monkeypatch):
 def make_client(tmp_path):
     def factory(transport=None, **kwargs):
         ledger = kwargs.pop("budget_ledger", Ledger())
-        config = kwargs.pop("runtime", RuntimeConfig(home=tmp_path))
+        config = kwargs.pop("runtime", RuntimeConfig(home=tmp_path, enabled=True))
         client = JevClient(
             api_key=kwargs.pop("api_key", KEY),
             runtime=config,
@@ -90,30 +103,6 @@ def make_client(tmp_path):
 
 def noul():
     return [NoulQuestion("q", "Does the excerpt report an error?")]
-
-
-@pytest.mark.parametrize("question_id", [
-    "sk-synthetic123456789", "npm_synthetic123456789", "password=synthetic",
-    "apikey_synthetic1234567890123456", KEY,
-])
-def test_secret_bearing_question_ids_fail_before_reservation(make_client, question_id):
-    client, ledger = make_client(transport=lambda *args: pytest.fail("Must not transmit"))
-    result = client.evaluate("sanitized excerpt", [NoulQuestion(question_id, "Is it relevant?")])
-    assert result.status == "unavailable" and result.error_code == "invalid_request"
-    assert result.attempts == 0 and ledger.reservations == []
-    assert question_id not in json.dumps(result.to_dict())
-
-
-@pytest.mark.parametrize("requested, returned, valid", [(1, True, False), (False, 0, False), (1, 1.0, True)])
-def test_structured_legend_preserves_json_types(make_client, requested, returned, valid):
-    def transport(request, *args):
-        response = response_for(request)
-        response["answers"]["q"]["legend"]["1"]["rank"] = returned
-        return wire(response)
-    client, _ = make_client(transport=transport)
-    result = client.evaluate("excerpt", [ScoreQuestion("q", "Rate evidence quality.",
-        criteria=["Absent evidence", {"description": "Present evidence", "rank": requested}])])
-    assert (result.status == "ok") is valid
 
 
 def test_native_contract_and_fractional_score(make_client):
@@ -307,50 +296,6 @@ def test_sanitized_request_and_detached_cache(make_client):
     assert original["password"] == "private-example"
 
 
-def test_score_rubrics_are_caller_local_with_sanitized_cache(make_client):
-    requests = []
-
-    def transport(request, *_):
-        requests.append(request.data)
-        return wire(response_for(request))
-
-    client, ledger = make_client(transport)
-    first_criteria = [{"description": "Low quality", "password": "synthetic-one"},
-                      {"description": "High quality", "rank": 1}]
-    second_criteria = copy.deepcopy(first_criteria)
-    second_criteria[0]["password"] = "synthetic-two"
-    first = client.evaluate("evidence", [ScoreQuestion("q", "Rate quality", criteria=first_criteria)])
-    assert first.status == "ok" and first.source == "provider"
-    assert first.get_score("q").legend == {str(i): v for i, v in enumerate(first_criteria)}
-    first.get_score("q").legend["0"]["description"] = "changed result"
-    assert first_criteria[0]["description"] == "Low quality"
-    second = client.evaluate("evidence", [ScoreQuestion("q", "Rate quality", criteria=second_criteria)])
-    assert second.status == "ok" and second.source == "cache"
-    assert second.get_score("q").legend == {str(i): v for i, v in enumerate(second_criteria)}
-    second.get_score("q").legend["0"]["password"] = "changed result"
-    third = client.evaluate("evidence", [ScoreQuestion("q", "Rate quality", criteria=second_criteria)])
-    assert third.get_score("q").legend["0"]["password"] == "synthetic-two"
-    assert len(requests) == 1 and ledger.reservations == [1]
-    assert second.usage == {"input_tokens": 0, "output_tokens": 0}
-    assert second.attempts == 0
-    for value in ("synthetic-one", "synthetic-two"):
-        assert value.encode() not in requests[0]
-        assert value not in json.dumps(next(iter(client._cache.values())).to_dict())
-
-
-@pytest.mark.parametrize("criterion", [
-    "Contains " + KEY, {"description": "Absent evidence", "nested": [KEY]},
-    {KEY: "Absent evidence"},
-])
-def test_score_rubric_never_returns_active_credential(make_client, criterion):
-    client, ledger = make_client(transport=lambda *args: pytest.fail("Must not transmit"))
-    result = client.evaluate("evidence", [ScoreQuestion("q", "Rate quality",
-                             criteria=[criterion, "Strong evidence"])])
-    assert result.status == "unavailable" and result.error_code == "invalid_request"
-    assert result.attempts == 0 and ledger.reservations == []
-    assert KEY not in json.dumps(result.to_dict())
-
-
 def test_transient_retry_reserves_every_attempt(make_client):
     calls = []
 
@@ -370,6 +315,7 @@ def test_transient_retry_reserves_every_attempt(make_client):
     (302, "redirect_rejected", 1),
     (401, "authentication_error", 1),
     (403, "authentication_error", 1),
+    (408, "timeout", 2),
     (429, "rate_limited", 2),
     (503, "provider_error", 2),
     (529, "provider_error", 2),
@@ -412,7 +358,10 @@ def test_end_to_end_transport_deadline(make_client):
         assert batch.error_code == "timeout"
         assert batch.attempts == 1
         assert elapsed < 0.3
-        assert ledger.settlements == [(1, None)]
+        assert ledger.reservations == [1]
+        # An expired call may leave the original worst-case reservation in place
+        # rather than spend more deadline time relabeling it as unknown.
+        assert ledger.settlements in ([], [(1, None)])
     finally:
         released.set()
 
@@ -480,11 +429,44 @@ def test_settlement_failure_prevents_exposing_a_success(make_client):
     assert not batch.decisions
 
 
+@pytest.mark.parametrize("tokens", [64001, MAX_SETTLEMENT_TOKENS, MAX_SETTLEMENT_TOKENS + 1,
+                                  MAX_SAFE_USAGE_INTEGER, MAX_SAFE_USAGE_INTEGER + 1, 10**100],
+                         ids=["above-provider-limit", "accounting-limit", "above-accounting-limit",
+                              "safe-integer-limit", "unsafe-integer", "huge-count"])
+def test_anomalous_usage_is_a_provider_error_with_conservative_accounting(tmp_path, tokens):
+    config = RuntimeConfig(home=tmp_path, enabled=True)
+    ledger = BudgetLedger(config)
+    calls = []
+
+    def transport(request, *_):
+        calls.append(1)
+        payload = response_for(request)
+        payload["usage"] = {"input_tokens": tokens, "output_tokens": 3}
+        return wire(payload)
+
+    client = JevClient(api_key=KEY, runtime=config, budget_ledger=ledger, transport=transport)
+    result = client.evaluate("An excerpt", noul())
+    assert result.error_code == "invalid_response" and not result.decisions
+    assert result.attempts == len(calls) == 1
+    assert result.usage == {"input_tokens": tokens if tokens <= MAX_SAFE_USAGE_INTEGER else None, "output_tokens": 3}
+    assert not client._cache
+    status = ledger.status()  # The ledger is healthy even for unsupported counts.
+    if tokens <= MAX_SETTLEMENT_TOKENS:
+        assert status["settled_attempts"] == 1 and status["held_usd"] == 0
+        assert status["known_spend_usd"] == tokens * NANODOLLARS_PER_TOKEN / NANODOLLARS_PER_DOLLAR
+    else:
+        assert status["unknown_attempts"] == 1 and status["known_spend_usd"] == 0
+        assert status["held_usd"] == status["reservation_usd"]
+
+
 def test_native_transport_does_not_redirect_or_read_error_bodies(monkeypatch):
     calls = []
 
     class Response:
         status = 302
+
+        def getheader(self, _name):
+            return None
 
         def read1(self, *_):
             pytest.fail("Error body must not be read")
@@ -494,6 +476,9 @@ def test_native_transport_does_not_redirect_or_read_error_bodies(monkeypatch):
 
         def __init__(self, host, timeout):
             calls.append(("connect", host, timeout))
+
+        def connect(self):
+            pass
 
         def request(self, method, path, body, headers):
             calls.append(("request", method, path))
@@ -507,7 +492,7 @@ def test_native_transport_does_not_redirect_or_read_error_bodies(monkeypatch):
     monkeypatch.setenv("HTTPS_PROXY", "http://untrusted.invalid")
     monkeypatch.setattr("jev_decision.client.http.client.HTTPSConnection", Connection)
     req = urllib.request.Request(DEFAULT_TYPESAFE_ENDPOINT, data=b"{}", method="POST")
-    assert _http_transport(req, 1, 100) == (302, b"")
+    assert _http_transport(req, 1, 100) == (302, b"", {})
     assert calls == [
         ("connect", "api.typesafe.ai", 1), ("request", "POST", "/v1/systemone"), ("close",),
     ]
@@ -517,3 +502,94 @@ def test_construction_does_not_create_ledger(tmp_path):
     client = JevClient(api_key="", runtime=RuntimeConfig(home=tmp_path))
     assert not client.is_configured
     assert list(tmp_path.iterdir()) == []
+
+
+def test_official_null_choice_descriptions(make_client):
+    questions = {"q": {"type": "choice", "instructions": "Choose a category",
+                        "criteria": {"yes": None, "no": None}}}
+    assert normalize_questions(questions) == questions
+    client, _ = make_client()
+    result = client.evaluate("An excerpt", questions)
+    assert result.status == "ok"
+    assert result.get_choice("q").selected == "no"  # canonical sorted request
+
+
+@pytest.mark.parametrize("hint", ["60", "Mon, 28 Sep 2099 12:00:00 GMT"])
+def test_retry_hint_outside_deadline_prevents_extra_attempt(make_client, hint):
+    client, ledger = make_client(lambda *_: (429, b"", {"Retry-After": hint}), timeout_s=0.2)
+    result = client.evaluate("An excerpt", noul())
+    assert result.error_code == "rate_limited"
+    assert result.attempts == 1
+    assert ledger.reservations == [1]
+
+
+def test_retry_after_date_and_delta_parsing():
+    from jev_decision.client import _retry_after
+    assert _retry_after({"retry-after": "1.25"}) == 1.25
+    assert _retry_after({"Retry-After": "Mon, 28 Sep 2020 12:00:00 GMT"}) == 0
+    assert _retry_after({"Retry-After": "Mon, 28 Sep 2099 12:00:00 GMT"}) > 1
+    for value in ["-1", "nan", "infinity", "not a date", "9" * 129]:
+        assert _retry_after({"retry-after": value}) is None
+
+
+def _noul_transport(calls):
+    def transport(request, timeout_s, limit):
+        body = json.loads(request.data)
+        calls.append(body)
+        answers = {key: {"type": "noul", "noul": 0.25} for key in body["questions"]}
+        return 200, json.dumps({"model": body["model"], "answers": answers,
+                                "usage": {"input_tokens": 12, "output_tokens": 0}}).encode()
+    return transport
+
+
+def test_library_key_before_setup_is_an_explicit_opt_in():
+    # README-level usage must work without `jev setup`; the default daily budget
+    # and shared ledger still bound spend.
+    calls = []
+    client = JevClient(api_key="synthetic-library-key", transport=_noul_transport(calls))
+    assert client.is_configured and client.runtime.enabled and not client.runtime.setup_complete
+    result = client.evaluate("sample", {"q": {"type": "noul", "instructions": "Is this a sample?"}})
+    assert result.status == "ok" and result.source == "provider" and len(calls) == 1
+    assert client.runtime.ledger_path.exists() and not client.runtime.config_path.exists()
+    assert client.runtime.daily_budget_usd == Decimal("1.00")
+
+
+@pytest.mark.parametrize("name", ["TYPESAFE_API_KEY", "JEV_API_KEY"])
+def test_ambient_key_does_not_authorize_fresh_library_calls(monkeypatch, name):
+    monkeypatch.setenv(name, "synthetic-library-key")
+    client = JevClient(transport=lambda *_: pytest.fail("Ambient key authorized a request"))
+    result = client.evaluate("sample", {"q": {"type": "noul", "instructions": "Is it?"}})
+    assert result.error_code == "runtime_disabled" and result.attempts == 0
+    assert not client.runtime.home.exists()
+
+
+def test_saved_or_harness_runtime_is_not_upgraded_by_a_library_key(monkeypatch):
+    monkeypatch.setenv("TYPESAFE_API_KEY", "synthetic-library-key")
+    unused = lambda *_: pytest.fail("Disabled runtime reached the provider")  # noqa: E731
+    # CLI/MCP pass their loaded runtime explicitly; a fresh install stays offline.
+    harness = JevClient(runtime=RuntimeConfig.load(), transport=unused)
+    assert harness.evaluate("sample", {"q": {"type": "noul", "instructions": "Is it?"}}).error_code == "runtime_disabled"
+    # A saved configuration, including a disabled one, is always respected.
+    RuntimeConfig(home=RuntimeConfig.load().home, daily_budget_usd=0).save()
+    for client in (JevClient(transport=unused), JevClient(api_key="synthetic-library-key", transport=unused)):
+        assert client.evaluate("sample", {"q": {"type": "noul", "instructions": "Is it?"}}).error_code == "runtime_disabled"
+    monkeypatch.setenv("TYPESAFE_API_KEY", "${TYPESAFE_API_KEY}")
+    assert not JevClient().is_configured
+
+
+def test_plain_question_objects_match_the_mcp_and_typescript_form():
+    plain = [{"id": "intent", "type": "choice", "instructions": "Classify the change.",
+              "criteria": {"feature": "Adds behavior", "bug": "Fixes behavior", "unclear": None}},
+             {"id": "legacy", "type": "score", "prompt": "How relevant?", "scale": ["Unrelated", "Related"]},
+             NoulQuestion("typed", "Is this a sample?")]
+    assert normalize_questions(plain) == {
+        "intent": {"type": "choice", "instructions": "Classify the change.",
+                   "criteria": {"feature": "Adds behavior", "bug": "Fixes behavior", "unclear": None}},
+        "legacy": {"type": "score", "instructions": "How relevant?", "criteria": ["Unrelated", "Related"]},
+        "typed": {"type": "noul", "instructions": "Is this a sample?"}}
+    for bad in ([{"id": "x", "type": "noul", "instructions": "Q?", "unexpected": 1}],
+                [{"id": "x", "type": "unknown", "instructions": "Q?"}],
+                [{"type": "noul", "instructions": "Q?"}],
+                [{"id": "x", "type": "noul", "instructions": "Q?"}, {"id": "x", "type": "noul", "instructions": "R?"}]):
+        with pytest.raises(ValueError):
+            normalize_questions(bad)

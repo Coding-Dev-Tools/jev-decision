@@ -1,9 +1,6 @@
-"""Jev System One Decision Engine & Harness Guardrails.
+"""Portable advisory TypeSafe Jev decisions with optional MCP and OS credentials."""
 
-Zero-dependency client, typed primitives, calibration profiles, and
-high-speed agent guardrails for Jev (TypeSafe AI).
-"""
-
+from ._version import __version__
 from .client import DEFAULT_MODEL, JevClient, normalize_questions, validate_response, validate_state
 from .fallback import evaluate_heuristics
 from .harness_guards import (
@@ -12,6 +9,7 @@ from .harness_guards import (
     prune_tool_output,
     verify_turn_completion,
 )
+from .memory import assess_memory_relation, assess_memory_relevance
 from .primitives import (
     DEFAULT_CALIBRATION,
     CalibrationTier,
@@ -26,8 +24,8 @@ from .primitives import (
     ScoreQuestion,
 )
 
-__version__ = "0.3.0"
 __all__ = [
+    "__version__",
     "JevClient",
     "DEFAULT_MODEL",
     "normalize_questions",
@@ -49,4 +47,6 @@ __all__ = [
     "prune_tool_output",
     "verify_turn_completion",
     "classify_memory_relation",
+    "assess_memory_relation",
+    "assess_memory_relevance",
 ]

@@ -16,7 +16,7 @@ $managedHome = (& $Python -c "from pathlib import Path; import sys; print(Path(s
 if ($LASTEXITCODE -ne 0) { throw "Unable to resolve physical runtime home" }
 $wheelDirectory = Join-Path $buildRoot ([guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $wheelDirectory -Force | Out-Null
-& $Python -m pip wheel --no-deps --no-build-isolation --wheel-dir $wheelDirectory $repoRoot
+& $Python -m pip wheel --no-deps --wheel-dir $wheelDirectory $repoRoot
 if ($LASTEXITCODE -ne 0) { throw "Wheel build failed" }
 $wheel = @(Get-ChildItem -LiteralPath $wheelDirectory -Filter "jev_decision-0.3.0-*.whl")
 if ($wheel.Count -ne 1) { throw "Expected exactly one version 0.3.0 wheel" }
@@ -42,11 +42,13 @@ $runtimePath = Split-Path -Parent (Split-Path -Parent $jevPython)
 $managedHome = Split-Path -Parent (Split-Path -Parent $runtimePath)
 $packageManifest = Join-Path $runtimePath "installation.json"
 if ($installPackage) {
-    & $jevPython -m pip install --no-deps --no-index $wheel[0].FullName
+    & $jevPython -m pip install ($wheel[0].FullName + "[mcp,setup]")
     if ($LASTEXITCODE -ne 0) { throw "Package installation failed" }
     & $jevPython -I -c "import jev_decision; assert jev_decision.__version__ == '0.3.0'"
     if ($LASTEXITCODE -ne 0) { throw "Installed version verification failed" }
 }
+& $jevPython -I -c "from jev_decision.mcp import create_sdk_server; create_sdk_server()"
+if ($LASTEXITCODE -ne 0) { throw "MCP dependency verification failed; rebuild in a new environment" }
 [IO.File]::WriteAllText((Join-Path $runtimePath "jev-runtime-home.txt"), $managedHome, (New-Object Text.UTF8Encoding($false)))
 $record = [ordered]@{
         version = "0.3.0"

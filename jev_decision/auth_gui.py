@@ -14,7 +14,7 @@ def main():
     root.geometry("510x230")
     root.resizable(False, False)
     tk.Label(root, text="Enter your TypeSafe API key", font=("Segoe UI", 13)).pack(pady=(20, 6))
-    tk.Label(root, text="Stored with Windows user-bound encryption.\nThe key is not sent to Codex or written in harness settings.", font=("Segoe UI", 10)).pack()
+    tk.Label(root, text="Stored with Windows user-bound encryption.\nThe key is never written to harness settings, prompts or logs.", font=("Segoe UI", 10)).pack()
     secret = tk.StringVar()
     entry = tk.Entry(root, textvariable=secret, show="*", width=55)
     entry.pack(pady=14)
