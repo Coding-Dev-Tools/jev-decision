@@ -239,16 +239,62 @@ def test_response_validation_is_bounded_and_preserves_uncertain_hold(tmp_path, m
 
 
 def test_two_concurrent_windows_share_one_client_without_changing_its_timeout(tmp_path):
+    # This checks per-call client state, not disk/fsync throughput. Real SQLite
+    # contention and concurrent one-attempt caps are exercised above.
+    class Ledger:
+        def __init__(self):
+            self.reservations = []
+            self.settlements = []
+            self.lock = threading.Lock()
+
+        def reserve(self, *, deadline):
+            reservation = object()
+            with self.lock:
+                self.reservations.append((reservation, deadline))
+            return reservation
+
+        def settle(self, reservation, *, token_count, deadline):
+            with self.lock:
+                self.settlements.append((reservation, token_count, deadline))
+
+    ledger = Ledger()
+    ready = threading.Barrier(3)
+    start = threading.Event()
     barrier = threading.Barrier(2)
-    def transport(*_):
-        barrier.wait(timeout=1)
+    observed_timeouts = []
+
+    def transport(_request, timeout_s, _limit):
+        observed_timeouts.append((timeout_s, client.timeout_s))
+        # The client's real deadline bounds this wait. Abort it in finally if
+        # the other invocation fails before reaching the transport.
+        barrier.wait()
         return 200, BODY
-    client = JevClient(api_key="fake-offline-test-key", runtime=RuntimeConfig(home=tmp_path, enabled=True), transport=transport)
-    deadline = time.monotonic() + 1
+
+    client = JevClient(api_key="fake-offline-test-key", runtime=RuntimeConfig(home=tmp_path, enabled=True),
+                       budget_ledger=ledger, transport=transport)
+
+    def evaluate(text):
+        ready.wait(timeout=5)  # Worker startup is outside the client deadline.
+        assert start.wait(5)
+        return client.evaluate(text, QUESTIONS, deadline_monotonic=deadline)
+
     with ThreadPoolExecutor(max_workers=2) as pool:
-        futures = [pool.submit(client.evaluate, text, QUESTIONS, deadline_monotonic=deadline)
-                   for text in ("First excerpt", "Second excerpt")]
-        results = [f.result(timeout=2) for f in futures]
-        assert [r.status for r in results] == ["ok", "ok"], [r.to_dict() for r in results]
+        futures = [pool.submit(evaluate, text) for text in ("First excerpt", "Second excerpt")]
+        try:
+            ready.wait(timeout=5)
+            deadline = time.monotonic() + 1
+            start.set()
+            results = [f.result(timeout=2) for f in futures]
+            assert [r.status for r in results] == ["ok", "ok"], [r.to_dict() for r in results]
+        finally:
+            start.set()
+            barrier.abort()
+            ready.abort()
     assert client.timeout_s == 5
-    assert BudgetLedger(client.runtime).status()["attempts"] == 2
+    assert len(observed_timeouts) == 2
+    assert all(0 < remaining <= 1 and configured == 5 for remaining, configured in observed_timeouts)
+    assert len(ledger.reservations) == len(ledger.settlements) == 2
+    assert {item[0] for item in ledger.reservations} == {item[0] for item in ledger.settlements}
+    assert all(item[1] == deadline for item in ledger.reservations)
+    assert all(tokens == 10 and settled_deadline == deadline
+               for _, tokens, settled_deadline in ledger.settlements)
